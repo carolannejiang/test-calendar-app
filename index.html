@@ -81,6 +81,7 @@ const SCENARIO = {
   --ev-red-fill: #fad2cf;   --ev-red-ink: #8c1d18;   --ev-red-bar: #d93025;
   --ev-orange-fill: #fedfc8;--ev-orange-ink: #7a3300;--ev-orange-bar: #f4511e;
   --ev-gray-fill: #e8eaed;  --ev-gray-ink: #3c4043;  --ev-gray-bar: #80868b;
+  --ev-yellow-fill: #feefc3;--ev-yellow-ink: #5f4300;--ev-yellow-bar: #f9ab00;
 
   --hour: 48px;
   --gutter: 64px;
@@ -99,6 +100,7 @@ const SCENARIO = {
     --ev-red-fill: #4b1f1c;   --ev-red-ink: #f9c0bb;   --ev-red-bar: #f28b82;
     --ev-orange-fill: #4a2c14;--ev-orange-ink: #fcc9a2;--ev-orange-bar: #fa903e;
     --ev-gray-fill: #3c4043;  --ev-gray-ink: #e8eaed;  --ev-gray-bar: #9aa0a6;
+    --ev-yellow-fill: #4a3b0f;--ev-yellow-ink: #fde293;--ev-yellow-bar: #fdd663;
   }
 }
 :root[data-theme="dark"] {
@@ -114,6 +116,7 @@ const SCENARIO = {
   --ev-red-fill: #4b1f1c;   --ev-red-ink: #f9c0bb;   --ev-red-bar: #f28b82;
   --ev-orange-fill: #4a2c14;--ev-orange-ink: #fcc9a2;--ev-orange-bar: #fa903e;
   --ev-gray-fill: #3c4043;  --ev-gray-ink: #e8eaed;  --ev-gray-bar: #9aa0a6;
+  --ev-yellow-fill: #4a3b0f;--ev-yellow-ink: #fde293;--ev-yellow-bar: #fdd663;
 }
 
 * { box-sizing: border-box; }
@@ -161,6 +164,7 @@ button { font: inherit; color: inherit; }
 .chip b { font-weight: 700; letter-spacing: .08em; }
 .timer { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 500; font-variant-numeric: tabular-nums; margin-right: 4px; }
 .timer svg { width: 18px; height: 18px; fill: var(--muted); }
+.timer-toggle { height: 28px; padding: 0 8px; font-size: 12px; font-weight: 400; color: var(--muted); }
 
 /* ---------- calendar ---------- */
 .cal { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; user-select: none; }
@@ -260,6 +264,11 @@ button { font: inherit; color: inherit; }
 .ev.c-red    { --ev-fill: var(--ev-red-fill);    --ev-ink: var(--ev-red-ink);    --ev-bar: var(--ev-red-bar); }
 .ev.c-orange { --ev-fill: var(--ev-orange-fill); --ev-ink: var(--ev-orange-ink); --ev-bar: var(--ev-orange-bar); }
 .ev.c-gray   { --ev-fill: var(--ev-gray-fill);   --ev-ink: var(--ev-gray-ink);   --ev-bar: var(--ev-gray-bar); }
+.ev.moved    { --ev-fill: var(--ev-yellow-fill); --ev-ink: var(--ev-yellow-ink); --ev-bar: var(--ev-yellow-bar); }
+.ev.deleted  { --ev-fill: var(--ev-gray-fill);   --ev-ink: var(--ev-gray-ink);   --ev-bar: var(--ev-gray-bar); opacity: .75; }
+.ev.deleted .t, .ev.deleted .w, .ev.deleted .d { text-decoration: line-through; }
+.ev.deleted .resize { display: none; }
+.popup .deleted-note { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
 .readonly .daycol, .readonly .allday, .readonly .ev { cursor: default; }
 .readonly .ev .resize { display: none; }
 
@@ -378,6 +387,7 @@ button { font: inherit; color: inherit; }
       <h1 id="monthTitle">September 2026</h1>
       <div class="spacer"></div>
       <span class="timer" id="timer" title="Time spent on this page" aria-live="off"><svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61 1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4a9 9 0 1 0 9 9c0-2.12-.74-4.07-1.97-5.61zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg><span id="timerText">0:00</span></span>
+      <button class="btn quiet timer-toggle" id="timerToggle" type="button">Hide timer</button>
       <span class="chip" id="candidateChip" title="Your anonymous candidate ID">Candidate <b id="candidateId">------</b></span>
       <button class="btn quiet" id="instrBtn" hidden>Instructions</button>
       <button class="btn primary" id="submitBtn">Submit</button>
@@ -401,6 +411,7 @@ button { font: inherit; color: inherit; }
   </div>
   <input type="text" id="popTitle" placeholder="Add title" autocomplete="off">
   <div class="popup-meta" id="popMeta" hidden></div>
+  <div class="deleted-note" id="popDeletedNote" hidden>This event is deleted. Click the restore icon to bring it back.</div>
   <div class="time">
     <input type="date" id="popDate" aria-label="Date">
     <select id="popStart" aria-label="Start time"></select>
@@ -473,7 +484,7 @@ button { font: inherit; color: inherit; }
   const COLORS = ["blue", "green", "purple", "red", "orange", "gray"];
 
   function normalize(e) {
-    const out = { id: e.id || uid(), title: e.title || "", notes: e.notes || "", location: e.location || "", detail: e.detail || "", date: e.date, allDay: false,
+    const out = { id: e.id || uid(), title: e.title || "", notes: e.notes || "", location: e.location || "", detail: e.detail || "", date: e.date, allDay: false, deleted: !!e.deleted,
       start: mins(e.start, 540), end: mins(e.end, 600),
       color: COLORS.includes(e.color) ? e.color : "blue" };
     if (!out.allDay) {
@@ -484,6 +495,8 @@ button { font: inherit; color: inherit; }
   }
   const clone = (evs) => evs.map((e) => ({ ...e }));
   const SEED = SCENARIO.events.map(normalize);
+  const SEED_BY_ID = Object.fromEntries(SEED.map((e) => [e.id, e]));
+  const isMoved = (e) => { const s0 = SEED_BY_ID[e.id]; return !!s0 && (e.date !== s0.date || e.start !== s0.start || e.end !== s0.end); };
 
   // ---------- storage ----------
   const KEY = "cal-test:" + SCENARIO.name;
@@ -518,6 +531,11 @@ button { font: inherit; color: inherit; }
   const fmtClock = (sec) => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return h ? `${h}:${pad(m)}:${pad(s2)}` : `${m}:${pad(s2)}`; };
   const drawTimer = () => { $("#timerText").textContent = fmtClock(state.activeSec); };
   drawTimer();
+  const TIMER_KEY = "cal-test:timer-hidden";
+  let timerHidden = false; try { timerHidden = localStorage.getItem(TIMER_KEY) === "1"; } catch {}
+  const applyTimerVisibility = () => { $("#timer").hidden = timerHidden || state.readOnly; $("#timerToggle").textContent = timerHidden ? "Show timer" : "Hide timer"; };
+  applyTimerVisibility();
+  $("#timerToggle").addEventListener("click", () => { timerHidden = !timerHidden; try { localStorage.setItem(TIMER_KEY, timerHidden ? "1" : "0"); } catch {} applyTimerVisibility(); });
   setInterval(() => {
     if (state.readOnly || document.visibilityState !== "visible") return;
     state.activeSec++; drawTimer(); if (state.activeSec % 5 === 0) persist();
@@ -570,7 +588,7 @@ button { font: inherit; color: inherit; }
 
   function evNode(e, isDragGhost) {
     const n = document.createElement("div");
-    n.className = `ev c-${e.color}` + (isDragGhost ? " ghost" : "") + (state.selected === e.id ? " selected" : "");
+    n.className = `ev c-${e.color}` + (isDragGhost ? " ghost" : "") + (state.selected === e.id ? " selected" : "") + (e.deleted ? " deleted" : isMoved(e) ? " moved" : "");
     n.dataset.id = e.id; n.tabIndex = state.readOnly ? -1 : 0; n.setAttribute("role", "button");
     const title = e.title || "(No title)";
     if (e.allDay) {
@@ -728,6 +746,7 @@ button { font: inherit; color: inherit; }
     const col = ev.target.closest(".daycol");
     if (evEl) {
       const e = evById(evEl.dataset.id); if (!e) return;
+      if (e.deleted) { ev.preventDefault(); Object.assign(drag, { active: true, kind: "open", id: e.id, moved: false }); return; }
       const isResize = ev.target.classList.contains("resize");
       Object.assign(drag, { active: true, kind: isResize ? "resize" : "move", id: e.id, x0: ev.clientX, y0: ev.clientY, moved: false,
         offset: e.allDay ? 0 : minuteAt(ev.clientY) - e.start, orig: { ...e }, work: clone(state.events) });
@@ -766,6 +785,7 @@ button { font: inherit; color: inherit; }
   window.addEventListener("pointerup", (ev) => {
     if (!drag.active) return;
     const d = { ...drag }; drag.active = false;
+    if (d.kind === "open") { openPopup(d.id); return; }
     if (d.kind === "create") {
       if (d.moved) {
         const m = snap(minuteAt(ev.clientY), 15);
@@ -799,6 +819,13 @@ button { font: inherit; color: inherit; }
     popId = id; state.selected = id;
     popTitle.value = e.title; popNotes.value = e.notes || ""; popDate.value = e.date;
     const meta = [e.location, e.detail].filter(Boolean).join(" \u00b7 "); $("#popMeta").textContent = meta; $("#popMeta").hidden = !meta;
+    const del = !!e.deleted;
+    $("#popDeletedNote").hidden = !del; $("#popSave").hidden = del;
+    for (const el of [popTitle, popDate, popStart, popEnd, popNotes]) el.disabled = del || state.readOnly;
+    $("#popDelete").title = del ? "Restore" : "Delete"; $("#popDelete").setAttribute("aria-label", del ? "Restore event" : "Delete event");
+    $("#popDelete").innerHTML = del
+      ? `<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.96 8.96 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>`
+      : `<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
     popStart.value = e.start; popEnd.value = e.end;
     popup.hidden = false;
     render();
@@ -808,7 +835,7 @@ button { font: inherit; color: inherit; }
     let left = r.right + 10; if (left + pw > innerWidth - 12) left = r.left - pw - 10; if (left < 12) left = clamp((innerWidth - pw) / 2, 12, innerWidth - pw - 12);
     let top = clamp(r.top, 12, innerHeight - ph - 12);
     popup.style.left = left + "px"; popup.style.top = top + "px";
-    popTitle.focus(); popTitle.select();
+    if (!popTitle.disabled) { popTitle.focus(); popTitle.select(); }
   }
   function closePopup(save) {
     if (popup.hidden) return;
@@ -826,8 +853,14 @@ button { font: inherit; color: inherit; }
   $("#popSave").addEventListener("click", () => closePopup(true));
   $("#popClose").addEventListener("click", () => closePopup(false));
   $("#popDelete").addEventListener("click", () => {
-    state.events = state.events.filter((x) => x.id !== popId); persist();
-    popup.hidden = true; popId = null; state.selected = null; render(); toast("Event deleted");
+    const e = evById(popId); if (!e) return;
+    if (SEED_BY_ID[e.id]) {
+      e.deleted = !e.deleted; persist();
+      popup.hidden = true; popId = null; state.selected = null; render(); toast(e.deleted ? "Event deleted" : "Event restored");
+    } else {
+      state.events = state.events.filter((x) => x.id !== popId); persist();
+      popup.hidden = true; popId = null; state.selected = null; render(); toast("Event removed");
+    }
   });
   popStart.addEventListener("change", () => { if (+popEnd.value <= +popStart.value) popEnd.value = Math.min(DAY_END, +popStart.value + 60); });
   popup.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === popTitle) { ev.preventDefault(); closePopup(true); } });
@@ -871,7 +904,7 @@ button { font: inherit; color: inherit; }
   function serialize() {
     const d = {}; for (const [k, v] of Object.entries(state.dayNotes)) if (v && v.trim()) d[k] = v.trim();
     return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(), o: state.openedAt, a: state.activeSec, d,
-      e: state.events.map((e) => [e.id, e.title, e.date, e.start, e.end, e.allDay ? 1 : 0, e.color, e.notes || ""]) };
+      e: state.events.map((e) => [e.id, e.title, e.date, e.start, e.end, e.allDay ? 1 : 0, e.color, e.notes || "", e.deleted ? 1 : 0]) };
   }
   async function copy(text, label) {
     try { await navigator.clipboard.writeText(text); toast(label + " copied"); }
@@ -895,7 +928,7 @@ button { font: inherit; color: inherit; }
     const out = [];
     for (const s of SEED) {
       const n = nowById[s.id];
-      if (!n) { out.push({ kind: "deleted", text: `${s.title || "(No title)"}`, from: when(s) }); continue; }
+      if (!n || n.deleted) { out.push({ kind: "deleted", text: `${s.title || "(No title)"}`, from: when(s) + (n && n.notes ? ` \u00b7 Notes: ${n.notes}` : "") }); continue; }
       const timeChanged = n.date !== s.date || n.allDay !== s.allDay || n.start !== s.start || n.end !== s.end;
       if (timeChanged) out.push({ kind: "moved", text: `${n.title || "(No title)"} \u2192 ${when(n)}`, from: `was ${when(s)}` });
       if (n.title !== s.title) out.push({ kind: "renamed", text: `"${s.title || "(No title)"}" \u2192 "${n.title || "(No title)"}"` });
@@ -934,7 +967,7 @@ button { font: inherit; color: inherit; }
     review.active = i; const p = review.subs[i];
     state.dayNotes = p.d || {};
     const seedById = Object.fromEntries(SEED.map((x) => [x.id, x]));
-    state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue", notes: a[7] || "",
+    state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue", notes: a[7] || "", deleted: !!a[8],
       location: (seedById[a[0]] || {}).location || "", detail: (seedById[a[0]] || {}).detail || "" }));
     const t = toDate(SCENARIO.today); state.weekStart = addDays(t, -t.getDay());
     render(); reviewRenderList();
@@ -965,14 +998,14 @@ button { font: inherit; color: inherit; }
     if (review.on) return; review.on = true; state.readOnly = true;
     closePopup(false); $("#submitModal").hidden = true;
     document.body.classList.add("readonly");
-    $("#reviewSide").hidden = false; $("#candidateChip").hidden = true; $("#submitBtn").hidden = true; $("#instrBtn").hidden = true; $("#timer").hidden = true;
+    $("#reviewSide").hidden = false; $("#candidateChip").hidden = true; $("#submitBtn").hidden = true; $("#instrBtn").hidden = true; $("#timer").hidden = true; $("#timerToggle").hidden = true;
     if (code) { try { reviewLoadCode(code); return; } catch {} }
     reviewShowSeed();
   }
   function exitReview() {
     if (!review.on) return; review.on = false; state.readOnly = false;
     document.body.classList.remove("readonly");
-    $("#reviewSide").hidden = true; $("#candidateChip").hidden = false; $("#submitBtn").hidden = false; $("#instrBtn").hidden = !SCENARIO.instructions; $("#timer").hidden = false;
+    $("#reviewSide").hidden = true; $("#candidateChip").hidden = false; $("#submitBtn").hidden = false; $("#instrBtn").hidden = !SCENARIO.instructions; $("#timerToggle").hidden = false; applyTimerVisibility();
     banner.hidden = true;
     const sv = load(KEY);
     state.events = sv && Array.isArray(sv.events) ? sv.events.map(normalize) : clone(SEED);
