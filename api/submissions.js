@@ -1,6 +1,7 @@
 // GET    /api/submissions        — list every submission (reviewer password required)
 // DELETE /api/submissions?id=... — remove one (reviewer password required)
 const { listSubmissions, deleteSubmission, cors, reviewerOk, fail } = require("./_store");
+const { isSubmissionId } = require("../shared/submission");
 
 module.exports = async (req, res) => {
   if (cors(req, res)) return;
@@ -8,13 +9,12 @@ module.exports = async (req, res) => {
   if (!reviewerOk(req)) return res.status(401).json({ ok: false, error: "Wrong reviewer password" });
   try {
     if (req.method === "GET") {
-      const subs = await listSubmissions();
-      subs.sort((a, b) => (b.t || "").localeCompare(a.t || ""));
-      return res.status(200).json({ ok: true, submissions: subs });
+      const page = await listSubmissions({ cursor: req.query && req.query.cursor });
+      return res.status(200).json({ ok: true, ...page });
     }
     if (req.method === "DELETE") {
       const id = (req.query && req.query.id) || "";
-      if (!/^[A-Z0-9]{4,12}-\d+$/.test(id)) return res.status(400).json({ ok: false, error: "Bad id" });
+      if (!isSubmissionId(id)) return res.status(400).json({ ok: false, error: "Bad id" });
       await deleteSubmission(id);
       return res.status(200).json({ ok: true });
     }

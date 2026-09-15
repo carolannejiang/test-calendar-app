@@ -2,35 +2,75 @@
 
 A Google Calendar–style week view used to administer scheduling work tests during hiring.
 
-Candidates open the page, follow the instructions, edit the calendar (create, move, resize, delete events), write their reasoning, and click **Submit**. The submission is saved to the backend automatically, and the page also shows a backup code the candidate can send if saving fails. Reviewers open the **reviewer view**, enter the reviewer password, and see every submission: the calendar, a list of changes from the starting scenario, per-day notes, and time spent.
+Candidates edit the starting calendar, write their reasoning, and click **Submit**. Responses are saved to a private backend. If saving fails, the page provides a backup code that contains the response. Reviewers enter their password to browse submissions, changes, notes, and reported time spent.
 
 Live: https://test-calendar-app.vercel.app · Reviewer view: https://test-calendar-app.vercel.app/?review (or /#review)
 
+## Local development and checks
+
+Use Node.js 24.15 or later in the 24.x line.
+
+```bash
+npm ci
+npm run check
+```
+
+`npm run check` runs ESLint and the Node regression tests. The tests use an isolated DOM and mocked Blob storage; they do not access production data. They cover payload validation, backup-code compatibility, overlapping events, reviewer refresh/delete races, pagination, authentication, and browser storage failures.
+
+For a frontend-only preview, serve the directory over HTTP, for example:
+
+```bash
+python3 -m http.server 8000
+```
+
+Open http://localhost:8000. This static server has no API, so Submit provides a backup code. To exercise the serverless functions locally, use Vercel's development server with a **separate development Blob store** and development environment variables.
+
+There is no build step. HTML, CSS, and JavaScript are served directly. `scenario.js` defaults `apiBase` to `""`, so API calls stay on the current origin. A cross-origin backend is an explicit opt-in for installations that serve the frontend separately; local and preview deployments should use their own backend configuration.
+
 ## Layout
 
-- `index.html` — the whole front end. Edit the `SCENARIO` block at the top to change the date, hours, instructions, starting events, and reviewer password hash.
-- `api/submit.js` — `POST /api/submit`, stores a candidate submission.
-- `api/submissions.js` — `GET /api/submissions` (list) and `DELETE /api/submissions?id=` (remove), both require the reviewer password.
-- `api/_store.js` — shared Blob storage and auth helpers.
+- `index.html` — accessible page and modal markup.
+- `styles.css` — calendar layout and system light/dark theme.
+- `scenario.js` — scenario name, date, visible hours, instructions, starting events, and password hashes.
+- `app.js` — calendar interactions, candidate progress, and reviewer UI.
+- `shared/submission.js` — shared payload validation, named event packing/unpacking, and C1/B1 backup codecs.
+- `shared/calendar.js` — date formatting, overlap layout, and change descriptions with an explicit starting calendar.
+- `shared/review.js` — stable submission identity, ordering, and cache reconciliation.
+- `shared/storage.js` — guarded browser storage with a memory fallback.
+- `api/submit.js` — `POST /api/submit`, validates and creates an immutable response.
+- `api/submissions.js` — authenticated `GET /api/submissions?cursor=…` and `DELETE /api/submissions?id=…`.
+- `api/_store.js` — private Blob access, pagination, and reviewer authentication.
+- `test/` — application, API, and shared-logic regression tests.
 
 ## Backend on Vercel
 
-Submissions are stored in a private **Vercel Blob** store (included in the Vercel plan, no add-on). Two environment variables make it work, both already set on the project:
+Configure these environment variables separately for production, previews, and development:
 
-- `BLOB_READ_WRITE_TOKEN` — created automatically when the Blob store was connected to the project.
-- `REVIEWER_PASSWORD` — the reviewer password. Must match the password whose SHA-256 hash is in `reviewerPasswordHash` in `index.html` (the password itself is not stored in this repo). To change it: set the new value in Vercel (Settings → Environment Variables), put the new hash in `index.html`, and redeploy. To make a hash:
-  ```bash
-  printf '%s' 'your-new-password' | shasum -a 256
-  ```
+- `BLOB_READ_WRITE_TOKEN` — token for the environment's private Vercel Blob store.
+- `REVIEWER_PASSWORD` — the reviewer password. Its SHA-256 hash must match `reviewerPasswordHash` in `scenario.js`.
 
-If either variable is missing, Submit falls back to showing the backup code and the reviewer view says so.
+To change the reviewer password, update the environment variable and frontend hash, then redeploy. Generate a hash with:
 
-## Reviewing
+```bash
+printf '%s' 'your-new-password' | shasum -a 256
+```
 
-Open `/#review`, enter the reviewer password. Submissions load from the server automatically (Refresh to re-check). Click one to see the candidate's calendar: moved events are yellow, deleted ones grey and struck through. The ✕ on a server submission deletes it permanently. You can also paste a backup code into the box to load it.
+The backend generates a UUID and `receivedAt` for each accepted response. Clients cannot choose a storage ID, overwrite an existing response, or supply server provenance. Candidate timestamps are retained for backup matching and reported duration; server receipt/upload times determine server ordering. Timing values supplied by candidates are informational, not independently verified measurements.
 
-## Notes
+Listing downloads at most 50 response bodies per request, with at most eight concurrent reads. It scans lightweight Blob metadata to identify the newest page. The returned cursor uses the last record's upload time and path, so deleting that record does not invalidate pagination. Invalid historical records are skipped and counted in the reviewer status.
 
-- No build step. Vercel serves `index.html` as a static page and the `api/` files as serverless functions (`package.json` pulls in `@vercel/blob`).
-- Candidate progress (events, notes, timer) is saved in their browser, so a reload does not lose work.
-- Change the `name` in `SCENARIO` whenever you change the starting events, so returning browsers start fresh.
+## Reviewing and compatibility
+
+Open `/#review` and enter the reviewer password. The newest page loads automatically; **Load more submissions** retrieves older responses. **Refresh** reloads the newest page and reconciles cached server records. The selected response is tracked by ID; if it is no longer in the refreshed page, the starting calendar is shown. Locally imported backup codes are retained.
+
+The ✕ next to a server response permanently deletes that response. The corresponding control on an imported code only removes it from the local list. Both UUIDs and legacy candidate/timestamp IDs remain supported for deletion.
+
+Existing C1 and B1 codes and their v1 event tuple positions remain readable, including the legacy all-day field. Candidate editing remains limited to timed events within the scenario week. Reviewers can navigate weeks and inspect legacy all-day responses.
+
+Change comparisons are only shown when a response's scenario name matches this installation's scenario. For other scenarios, the reviewer sees the submitted calendar and notes with a notice that the original starting calendar is unavailable. No changes are inferred from an unrelated starting calendar.
+
+## Changing scenarios and candidate progress
+
+Edit `scenario.js`. **Change the scenario name whenever starting events, dates, or hours change**, so old browser drafts are not reused and historical submissions are not compared against a changed baseline. Keep a copy of the previous scenario configuration if you need its original change comparisons later.
+
+Candidate progress is saved in browser storage. When storage is blocked or full, the app continues in memory and tells the candidate to keep the page open until submitting. Closing that page cannot preserve an in-memory draft.
