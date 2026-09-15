@@ -12,6 +12,13 @@
                    range fills the window; nothing outside it is shown.
    - instructions: shown to the candidate behind the "Instructions"
                    button. Set to "" to hide the button.
+   - apiBase:      where the backend lives. "" means the same site
+                   (the Vercel deployment with the /api folder). Set a
+                   full origin like "https://your-app.vercel.app" if
+                   this page is hosted somewhere else. The backend
+                   needs two things on Vercel: an Upstash Redis store
+                   connected to the project, and a REVIEWER_PASSWORD
+                   environment variable (see README).
    - reviewerPasswordHash: SHA-256 of the password that unlocks the
                    reviewer view (#review). Default password is
                    "reviewer2026". To change it, run in a terminal:
@@ -33,6 +40,7 @@ const SCENARIO = {
   timezone: "PDT",
   dayStart: "08:00",
   dayEnd: "19:00",
+  apiBase: "https://test-calendar-app.vercel.app",
   reviewerPasswordHash: "596ea2b4822da9258daa5437275db71496ee5d54cb7afa370f5c9d8c7363bd1c",
   instructions:
     "Review the calendar and complete the scheduling task you were given. " +
@@ -326,6 +334,10 @@ button { font: inherit; color: inherit; }
 .modal .pw-input:focus { border-color: var(--accent); outline: none; }
 .modal .err { color: var(--danger); font-size: 13px; margin-top: 8px; }
 .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.modal .submit-status { font-weight: 500; color: var(--text); }
+.modal .submit-status.ok { color: var(--ok); }
+.modal .submit-status.bad { color: var(--danger); }
+.modal .submit-backup { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .modal .code-id { font-size: 28px; font-weight: 700; letter-spacing: .12em; font-variant-numeric: tabular-nums; margin: 4px 0 12px; }
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 40;
@@ -348,6 +360,9 @@ button { font: inherit; color: inherit; }
 }
 .review-side .load { display: flex; gap: 8px; margin: 8px 0 16px; }
 .review-side .err { color: var(--danger); font-size: 12px; margin: -8px 0 12px; }
+.server-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -8px 0 8px; }
+.server-status { font-size: 12px; color: var(--muted); }
+.server-status.bad { color: var(--danger); }
 .sublist { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .sublist button {
   width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line); background: var(--card);
@@ -388,6 +403,7 @@ button { font: inherit; color: inherit; }
     <textarea id="reviewInput" placeholder="C1.N4IgzgpgTgLg..." aria-label="Submission code"></textarea>
     <div class="load"><button class="btn primary" id="reviewLoad">Load</button><button class="btn" id="reviewSeed">Starting calendar</button></div>
     <div class="err" id="reviewErr" hidden></div>
+    <div class="server-row"><span id="serverStatus" class="server-status"></span><button class="btn quiet" id="serverRefresh" hidden>Refresh</button></div>
     <ul class="sublist" id="subList"></ul>
     <div class="changes" id="changes"></div>
     <div class="foot">Loaded submissions stay in this browser only. <a href="#" id="exitReview">Exit reviewer view</a></div>
@@ -439,9 +455,10 @@ button { font: inherit; color: inherit; }
 
 <div class="scrim" id="submitModal" hidden>
   <div class="modal" role="dialog" aria-label="Submit your calendar">
-    <h2>Your submission code</h2>
-    <p>Copy this code and send it back to us. It contains your calendar and your anonymous candidate ID, nothing else.</p>
+    <h2>Submit your calendar</h2>
+    <p class="submit-status" id="submitStatus">Saving\u2026</p>
     <div class="code-id" id="submitId"></div>
+    <p class="submit-backup" id="submitBackup">Backup code, in case we ask for it:</p>
     <textarea id="submitCode" readonly aria-label="Submission code"></textarea>
     <div class="actions">
       <button class="btn" id="submitCloseBtn">Close</button>
@@ -932,11 +949,29 @@ button { font: inherit; color: inherit; }
     try { await navigator.clipboard.writeText(text); toast(label + " copied"); }
     catch { const ta = $("#submitCode"); ta.select(); document.execCommand("copy"); toast(label + " copied"); }
   }
+  const API = (SCENARIO.apiBase || "").replace(/\/$/, "");
+  const hasBackend = () => !!API || /^https?:$/.test(location.protocol);
+  async function postSubmission(payload) {
+    const r = await fetch(API + "/api/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }
   let lastCode = "";
-  $("#submitBtn").addEventListener("click", () => {
+  $("#submitBtn").addEventListener("click", async () => {
     closePopup(false);
-    lastCode = encodePayload(serialize());
+    const payload = serialize();
+    lastCode = encodePayload(payload);
+    const st = $("#submitStatus");
     $("#submitId").textContent = state.candidate; $("#submitCode").value = lastCode; $("#submitModal").hidden = false;
+    st.className = "submit-status"; st.textContent = "Saving\u2026";
+    if (!hasBackend()) { st.className = "submit-status"; st.textContent = "Copy the code below and send it to us. It contains your calendar and your anonymous candidate ID, nothing else."; return; }
+    try {
+      await postSubmission(payload);
+      st.className = "submit-status ok"; st.textContent = "\u2713 Saved. Your calendar has been sent to the hiring team. You can close this window.";
+    } catch (e) {
+      st.className = "submit-status bad"; st.textContent = "We couldn\u2019t save this automatically. Please copy the code below and send it to us.";
+    }
   });
   $("#submitCloseBtn").addEventListener("click", () => { $("#submitModal").hidden = true; });
   $("#submitModal").addEventListener("click", (ev) => { if (ev.target === ev.currentTarget) ev.currentTarget.hidden = true; });
@@ -998,6 +1033,35 @@ button { font: inherit; color: inherit; }
     banner.textContent = `Reviewer view \u00b7 Candidate ${p.c} \u00b7 submitted ${new Date(p.t).toLocaleString()}${timing}` + (p.s !== SCENARIO.name ? ` \u00b7 scenario "${p.s}" (differs from this file's "${SCENARIO.name}")` : "");
     renderChanges(state.events, `Changes \u00b7 candidate ${p.c}`);
   }
+  const PW_KEY = "cal-test:reviewer-pw";
+  const reviewerPw = () => { try { return sessionStorage.getItem(PW_KEY) || ""; } catch { return ""; } };
+  function mergeSub(p) {
+    const i = review.subs.findIndex((x) => x.c === p.c && x.t === p.t);
+    if (i < 0) review.subs.push(p); else review.subs[i] = { ...review.subs[i], ...p };
+  }
+  async function loadServerSubs() {
+    const st = $("#serverStatus"), btn = $("#serverRefresh");
+    if (!hasBackend()) { st.className = "server-status"; st.textContent = "No server on this page: paste codes above."; btn.hidden = true; return; }
+    st.className = "server-status"; st.textContent = "Loading submissions\u2026"; btn.hidden = false;
+    try {
+      const r = await fetch(API + "/api/submissions", { headers: { "X-Reviewer-Password": reviewerPw() } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      for (const p of j.submissions) mergeSub({ ...p, _server: true });
+      review.subs.sort((a, b) => (b.t || "").localeCompare(a.t || ""));
+      store(REVIEW_KEY, review.subs); reviewRenderList();
+      st.textContent = `${j.submissions.length} submission${j.submissions.length === 1 ? "" : "s"} on the server`;
+    } catch (e) {
+      st.className = "server-status bad";
+      st.textContent = /Wrong reviewer password/.test(e.message) ? "Server rejected the reviewer password (REVIEWER_PASSWORD on Vercel must match)." : `Couldn\u2019t load from server: ${e.message}`;
+    }
+  }
+  async function deleteServerSub(p) {
+    const r = await fetch(API + "/api/submissions?id=" + encodeURIComponent(p.id), { method: "DELETE", headers: { "X-Reviewer-Password": reviewerPw() } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  }
+  $("#serverRefresh").addEventListener("click", loadServerSubs);
   function reviewRenderList() {
     const ul = $("#subList"); ul.innerHTML = "";
     review.subs.forEach((p, i) => {
@@ -1005,8 +1069,15 @@ button { font: inherit; color: inherit; }
       const b = document.createElement("button"); b.className = i === review.active ? "active" : "";
       b.innerHTML = `<span><b></b> <small></small></span>`;
       b.querySelector("b").textContent = p.c; b.querySelector("small").textContent = new Date(p.t).toLocaleDateString() + (p.o ? ` \u00b7 ${fmtDur(p.a || 0)}` : "");
-      const x = document.createElement("button"); x.className = "x"; x.textContent = "\u2715"; x.title = "Remove from this list";
-      x.addEventListener("click", (ev) => { ev.stopPropagation(); review.subs.splice(i, 1); store(REVIEW_KEY, review.subs); if (review.active === i) reviewShowSeed(); else { if (review.active > i) review.active--; reviewRenderList(); } });
+      const x = document.createElement("button"); x.className = "x"; x.textContent = "\u2715"; x.title = p._server ? "Delete from the server" : "Remove from this list";
+      x.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (p._server) {
+          if (!confirm(`Delete candidate ${p.c}'s submission from the server? This cannot be undone.`)) return;
+          try { await deleteServerSub(p); } catch (e) { alert("Could not delete: " + e.message); return; }
+        }
+        review.subs.splice(i, 1); store(REVIEW_KEY, review.subs); if (review.active === i) reviewShowSeed(); else { if (review.active > i) review.active--; reviewRenderList(); }
+      });
       b.appendChild(x); b.addEventListener("click", () => reviewShowSub(i));
       li.appendChild(b); ul.appendChild(li);
     });
@@ -1022,7 +1093,8 @@ button { font: inherit; color: inherit; }
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
   function reviewerUnlocked() {
-    const h = SCENARIO.reviewerPasswordHash; if (!h) return true;
+    const h = SCENARIO.reviewerPasswordHash;
+    if (!h) return !hasBackend() || !!reviewerPw();
     try { return sessionStorage.getItem(PW_OK_KEY) === h; } catch { return false; }
   }
   function askReviewerPassword(then) {
@@ -1031,8 +1103,9 @@ button { font: inherit; color: inherit; }
     const done = () => { m.hidden = true; $("#pwUnlock").onclick = null; $("#pwCancel").onclick = null; inp.onkeydown = null; };
     const attempt = async () => {
       if (!crypto.subtle) { err.textContent = "Password check needs a secure (https) connection."; err.hidden = false; return; }
+      if (!SCENARIO.reviewerPasswordHash) { try { sessionStorage.setItem(PW_KEY, inp.value); } catch {} done(); then(); return; }
       const h = await sha256Hex(inp.value);
-      if (h === SCENARIO.reviewerPasswordHash) { try { sessionStorage.setItem(PW_OK_KEY, h); } catch {} done(); then(); }
+      if (h === SCENARIO.reviewerPasswordHash) { try { sessionStorage.setItem(PW_OK_KEY, h); sessionStorage.setItem(PW_KEY, inp.value); } catch {} done(); then(); }
       else { err.textContent = "That password is not correct."; err.hidden = false; inp.select(); }
     };
     $("#pwUnlock").onclick = attempt;
@@ -1046,8 +1119,8 @@ button { font: inherit; color: inherit; }
     closePopup(false); $("#submitModal").hidden = true;
     document.body.classList.add("readonly");
     $("#reviewSide").hidden = false; $("#candidateChip").hidden = true; $("#submitBtn").hidden = true; $("#instrBtn").hidden = true; $("#timer").hidden = true; $("#timerToggle").hidden = true;
-    if (code) { try { reviewLoadCode(code); return; } catch {} }
-    reviewShowSeed();
+    if (code) { try { reviewLoadCode(code); } catch { reviewShowSeed(); } } else reviewShowSeed();
+    loadServerSubs();
   }
   function exitReview() {
     if (!review.on) return; review.on = false; state.readOnly = false;
