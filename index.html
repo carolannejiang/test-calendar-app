@@ -526,7 +526,8 @@ button { font: inherit; color: inherit; }
       const dur = e.end - e.start;
       n.style.top = ((e.start - DAY_START) / 60 * HOUR) + "px";
       n.style.height = Math.max(dur / 60 * HOUR - 1, 12) + "px";
-      if (dur < 30) n.classList.add("tiny"); else if (dur < 50) n.classList.add("short");
+      const px = dur / 60 * HOUR;
+      if (px < 20) n.classList.add("tiny"); else if (px < 36) n.classList.add("short");
       if (e._cols > 1) { const w = 100 / e._cols; n.style.left = `calc(${w * e._col}% + 2px)`; n.style.width = `calc(${w}% - 5px)`; n.style.right = "auto"; }
       n.innerHTML = `<span class="t"></span><span class="w"></span><div class="resize"></div>`;
       n.querySelector(".t").textContent = title; n.querySelector(".w").textContent = fmtRange(e.start, e.end);
