@@ -45,12 +45,12 @@ test("layout separates overlapping events, reuses columns, and does not mutate i
 });
 
 test("change descriptions use the explicit seed and preserve legacy all-day changes", () => {
-  const seed = [event()];
+  const seed = new Map([["mon1", event()]]);
   assert.deepEqual(describeChanges([event()], seed), []);
   assert.equal(describeChanges([event({ allDay: true })], seed)[0].kind, "moved");
   assert.equal(describeChanges([], seed)[0].kind, "deleted");
   const otherSeed = [event({ start: 600, end: 660 })];
-  assert.deepEqual(describeChanges(otherSeed, otherSeed), []);
+  assert.deepEqual(describeChanges(otherSeed, new Map(otherSeed.map(e => [e.id, e]))), []);
 });
 
 test("refresh replaces server cache, keeps imports and sorts by server receipt", () => {
