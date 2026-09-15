@@ -138,7 +138,6 @@ button { font: inherit; color: inherit; }
   font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: .02em; white-space: nowrap;
 }
 .chip b { font-weight: 700; letter-spacing: .08em; }
-.reviewer-link { color: var(--muted); font-weight: 400; font-size: 13px; }
 
 /* ---------- calendar ---------- */
 .cal { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; user-select: none; }
@@ -317,8 +316,6 @@ button { font: inherit; color: inherit; }
       <span class="chip" id="candidateChip" title="Your anonymous candidate ID">Candidate <b id="candidateId">------</b></span>
       <button class="btn quiet" id="instrBtn" hidden>Instructions</button>
       <button class="btn primary" id="submitBtn">Submit</button>
-      <button class="btn quiet reviewer-link" id="menuReview">Reviewer</button>
-      <button class="btn quiet reviewer-link" id="menuCandidate" hidden>Back to candidate view</button>
     </header>
 
     <div class="cal" id="cal">
@@ -765,7 +762,6 @@ button { font: inherit; color: inherit; }
     closePopup(false); $("#submitModal").hidden = true;
     document.body.classList.add("readonly");
     $("#reviewSide").hidden = false; $("#candidateChip").hidden = true; $("#submitBtn").hidden = true; $("#instrBtn").hidden = true;
-    $("#menuReview").hidden = true; $("#menuCandidate").hidden = false;
     if (code) { try { reviewLoadCode(code); return; } catch {} }
     reviewShowSeed();
   }
@@ -773,7 +769,7 @@ button { font: inherit; color: inherit; }
     if (!review.on) return; review.on = false; state.readOnly = false;
     document.body.classList.remove("readonly");
     $("#reviewSide").hidden = true; $("#candidateChip").hidden = false; $("#submitBtn").hidden = false; $("#instrBtn").hidden = !SCENARIO.instructions;
-    $("#menuReview").hidden = false; $("#menuCandidate").hidden = true; banner.hidden = true;
+    banner.hidden = true;
     const sv = load(KEY);
     state.events = sv && Array.isArray(sv.events) ? sv.events.map(normalize) : clone(SEED);
     const t = toDate(SCENARIO.today); state.weekStart = addDays(t, -t.getDay());
@@ -787,8 +783,6 @@ button { font: inherit; color: inherit; }
   $("#reviewSeed").addEventListener("click", reviewShowSeed);
   $("#exitReview").addEventListener("click", (ev) => { ev.preventDefault(); exitReview(); });
 
-  $("#menuReview").addEventListener("click", () => enterReview());
-  $("#menuCandidate").addEventListener("click", () => exitReview());
 
   $("#candidateId").textContent = state.candidate;
   render();
