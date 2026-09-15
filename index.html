@@ -426,9 +426,20 @@ button { font: inherit; color: inherit; }
     weekStart: (() => { const t = toDate(SCENARIO.today); return addDays(t, -t.getDay()); })(),
     readOnly: false,
     selected: null,
+    openedAt: (saved && saved.openedAt) || new Date().toISOString(),
+    activeSec: (saved && saved.activeSec) || 0,
   };
-  function persist() { if (!state.readOnly) store(KEY, { candidate: state.candidate, events: state.events }); }
+  function persist() { if (!state.readOnly) store(KEY, { candidate: state.candidate, events: state.events, openedAt: state.openedAt, activeSec: state.activeSec }); }
   persist();
+
+  // time on page: counts seconds while the tab is visible, saved every few seconds
+  setInterval(() => {
+    if (state.readOnly || document.visibilityState !== "visible") return;
+    state.activeSec++; if (state.activeSec % 5 === 0) persist();
+  }, 1000);
+  document.addEventListener("visibilitychange", () => persist());
+  window.addEventListener("pagehide", () => persist());
+  const fmtDur = (sec) => { sec = Math.round(sec); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return h ? `${h}h ${pad(m)}m` : `${m}m ${pad(s2)}s`; };
 
   // ---------- DOM refs ----------
   const cal = $("#cal"), grid = $("#grid"), dayHeads = $("#dayHeads"), allDayRow = $("#allDayRow");
@@ -678,7 +689,7 @@ button { font: inherit; color: inherit; }
     return p;
   }
   function serialize() {
-    return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(),
+    return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(), o: state.openedAt, a: state.activeSec,
       e: state.events.map((e) => [e.id, e.title, e.date, e.start, e.end, e.allDay ? 1 : 0, e.color]) };
   }
   async function copy(text, label) {
@@ -736,7 +747,8 @@ button { font: inherit; color: inherit; }
     const t = toDate(SCENARIO.today); state.weekStart = addDays(t, -t.getDay());
     render(); reviewRenderList();
     banner.hidden = false;
-    banner.textContent = `Reviewer view \u00b7 Candidate ${p.c} \u00b7 submitted ${new Date(p.t).toLocaleString()}` + (p.s !== SCENARIO.name ? ` \u00b7 scenario "${p.s}" (differs from this file's "${SCENARIO.name}")` : "");
+    const timing = p.o ? ` \u00b7 active ${fmtDur(p.a || 0)}, ${fmtDur((new Date(p.t) - new Date(p.o)) / 1000)} from first open to submit` : "";
+    banner.textContent = `Reviewer view \u00b7 Candidate ${p.c} \u00b7 submitted ${new Date(p.t).toLocaleString()}${timing}` + (p.s !== SCENARIO.name ? ` \u00b7 scenario "${p.s}" (differs from this file's "${SCENARIO.name}")` : "");
     renderChanges(state.events, `Changes \u00b7 candidate ${p.c}`);
   }
   function reviewRenderList() {
@@ -745,7 +757,7 @@ button { font: inherit; color: inherit; }
       const li = document.createElement("li");
       const b = document.createElement("button"); b.className = i === review.active ? "active" : "";
       b.innerHTML = `<span><b></b> <small></small></span>`;
-      b.querySelector("b").textContent = p.c; b.querySelector("small").textContent = new Date(p.t).toLocaleDateString();
+      b.querySelector("b").textContent = p.c; b.querySelector("small").textContent = new Date(p.t).toLocaleDateString() + (p.o ? ` \u00b7 ${fmtDur(p.a || 0)}` : "");
       const x = document.createElement("button"); x.className = "x"; x.textContent = "\u2715"; x.title = "Remove from this list";
       x.addEventListener("click", (ev) => { ev.stopPropagation(); review.subs.splice(i, 1); store(REVIEW_KEY, review.subs); if (review.active === i) reviewShowSeed(); else { if (review.active > i) review.active--; reviewRenderList(); } });
       b.appendChild(x); b.addEventListener("click", () => reviewShowSub(i));
