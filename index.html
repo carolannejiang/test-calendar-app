@@ -16,12 +16,14 @@
                    id so the reviewer view can tell moved/deleted
                    events from new ones. Times are 24h "HH:MM".
                    color: blue | green | purple | red | orange | gray
+                   location / detail: optional, shown as a third line
+                   at the bottom of the event block (not editable).
                    The scenario name is also the storage key: change
                    it whenever you change the events so returning
                    browsers start fresh.
    ============================================================ */
 const SCENARIO = {
-  name: "Scheduling test v2",
+  name: "Scheduling test v3",
   today: "2026-09-14",
   timezone: "PDT",
   dayStart: "08:00",
@@ -41,12 +43,12 @@ const SCENARIO = {
     { id: "wed1", title: "Leadership meeting",            date: "2026-09-16", start: "09:30", end: "11:00" },
     { id: "wed2", title: "Board deck prep w/ Beth",       date: "2026-09-16", start: "11:00", end: "12:00" },
     { id: "wed3", title: "Interview \u2014 Priya Raman (Anthropic), Policy Analyst", date: "2026-09-16", start: "14:00", end: "15:00" },
-    { id: "wed4", title: "Coaching w/ Ben (recurring, every other week)", date: "2026-09-16", start: "16:00", end: "17:00" },
+    { id: "wed4", title: "Coaching w/ Ben",               date: "2026-09-16", start: "16:00", end: "17:00", detail: "Recurring, every other week" },
     { id: "thu1", title: "All hands",                     date: "2026-09-17", start: "10:00", end: "11:00" },
     { id: "thu2", title: "Ethan",                         date: "2026-09-17", start: "10:30", end: "11:00" },
-    { id: "thu3", title: "Lunch w/ Sami, Berkeley",       date: "2026-09-17", start: "12:30", end: "13:30" },
-    { id: "thu4", title: "Talk at OrgZ, SF Mission District", date: "2026-09-17", start: "14:00", end: "15:00" },
-    { id: "fri1", title: "1:1 Lawrence (4th scheduled slot; moved 3 times)", date: "2026-09-18", start: "09:00", end: "09:30" },
+    { id: "thu3", title: "Lunch w/ Sami",                 date: "2026-09-17", start: "12:30", end: "13:30", location: "Berkeley" },
+    { id: "thu4", title: "Talk at OrgZ",                  date: "2026-09-17", start: "14:00", end: "15:00", location: "SF Mission District" },
+    { id: "fri1", title: "1:1 Lawrence",                  date: "2026-09-18", start: "09:00", end: "09:30", detail: "4th scheduled slot; moved 3 times" },
     { id: "fri2", title: "Weekly check-in w/ [you]",      date: "2026-09-18", start: "11:00", end: "11:30" }
   ]
 };
@@ -205,6 +207,8 @@ button { font: inherit; color: inherit; }
 .ev::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--ev-bar); }
 .ev .t { font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ev .w { display: block; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.ev .d { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; font-style: italic; }
+.ev.dense { font-size: 11px; line-height: 1.15; padding-top: 1px; padding-bottom: 1px; }
 .ev.short { padding-top: 1px; padding-bottom: 1px; line-height: 1.2; font-size: 11px; }
 .ev.short .t { display: inline; }
 .ev.short .w { display: inline; }
@@ -240,6 +244,7 @@ button { font: inherit; color: inherit; }
   border: 0; border-bottom: 2px solid var(--line); background: transparent; padding: 6px 0; margin-bottom: 14px;
 }
 .popup input[type="text"]:focus { border-bottom-color: var(--accent); outline: none; }
+.popup .popup-meta { color: var(--muted); font-size: 13px; margin: -8px 0 12px; }
 .popup .time { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .popup select, .popup input[type="date"] {
   font: inherit; color: var(--text); background: var(--field); border: 1px solid transparent;
@@ -360,6 +365,7 @@ button { font: inherit; color: inherit; }
     <button class="btn icon" id="popClose" aria-label="Close" title="Close"><svg viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4l5.6 5.6L5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6z"/></svg></button>
   </div>
   <input type="text" id="popTitle" placeholder="Add title" autocomplete="off">
+  <div class="popup-meta" id="popMeta" hidden></div>
   <div class="time">
     <input type="date" id="popDate" aria-label="Date">
     <select id="popStart" aria-label="Start time"></select>
@@ -424,7 +430,7 @@ button { font: inherit; color: inherit; }
   const COLORS = ["blue", "green", "purple", "red", "orange", "gray"];
 
   function normalize(e) {
-    const out = { id: e.id || uid(), title: e.title || "", notes: e.notes || "", date: e.date, allDay: false,
+    const out = { id: e.id || uid(), title: e.title || "", notes: e.notes || "", location: e.location || "", detail: e.detail || "", date: e.date, allDay: false,
       start: mins(e.start, 540), end: mins(e.end, 600),
       color: COLORS.includes(e.color) ? e.color : "blue" };
     if (!out.allDay) {
@@ -527,11 +533,14 @@ button { font: inherit; color: inherit; }
       n.style.top = ((e.start - DAY_START) / 60 * HOUR) + "px";
       n.style.height = Math.max(dur / 60 * HOUR - 1, 12) + "px";
       const px = dur / 60 * HOUR;
-      if (px < 20) n.classList.add("tiny"); else if (px < 36) n.classList.add("short");
+      const extra = [e.location, e.detail].filter(Boolean).join(" \u00b7 ");
+      const threeLines = !!extra && px >= 38;
+      if (px < 20) n.classList.add("tiny"); else if (px < 36) n.classList.add("short"); else if (threeLines && px < 56) n.classList.add("dense");
       if (e._cols > 1) { const w = 100 / e._cols; n.style.left = `calc(${w * e._col}% + 2px)`; n.style.width = `calc(${w}% - 5px)`; n.style.right = "auto"; }
-      n.innerHTML = `<span class="t"></span><span class="w"></span><div class="resize"></div>`;
+      n.innerHTML = `<span class="t"></span><span class="w"></span>${threeLines ? `<span class="d"></span>` : ""}<div class="resize"></div>`;
       n.querySelector(".t").textContent = title; n.querySelector(".w").textContent = fmtRange(e.start, e.end);
-      n.title = `${title}\n${fmtRange(e.start, e.end)}` + (e.notes ? `\n\n${e.notes}` : "");
+      if (threeLines) n.querySelector(".d").textContent = extra;
+      n.title = `${title}\n${fmtRange(e.start, e.end)}` + (extra ? `\n${extra}` : "") + (e.notes ? `\n\n${e.notes}` : "");
     }
     return n;
   }
@@ -654,6 +663,7 @@ button { font: inherit; color: inherit; }
     const e = evById(id); if (!e) return;
     popId = id; state.selected = id;
     popTitle.value = e.title; popNotes.value = e.notes || ""; popDate.value = e.date;
+    const meta = [e.location, e.detail].filter(Boolean).join(" \u00b7 "); $("#popMeta").textContent = meta; $("#popMeta").hidden = !meta;
     popStart.value = e.start; popEnd.value = e.end;
     popup.hidden = false;
     render();
@@ -778,7 +788,9 @@ button { font: inherit; color: inherit; }
   }
   function reviewShowSub(i) {
     review.active = i; const p = review.subs[i];
-    state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue", notes: a[7] || "" }));
+    const seedById = Object.fromEntries(SEED.map((x) => [x.id, x]));
+    state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue", notes: a[7] || "",
+      location: (seedById[a[0]] || {}).location || "", detail: (seedById[a[0]] || {}).detail || "" }));
     const t = toDate(SCENARIO.today); state.weekStart = addDays(t, -t.getDay());
     render(); reviewRenderList();
     banner.hidden = false;
