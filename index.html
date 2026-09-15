@@ -958,6 +958,7 @@ button { font: inherit; color: inherit; }
   }
   let lastCode = "";
   $("#submitBtn").addEventListener("click", async () => {
+    if (!confirm("Submit your calendar now? Make sure you are finished before continuing.")) return;
     closePopup(false);
     const payload = serialize();
     lastCode = encodePayload(payload);
