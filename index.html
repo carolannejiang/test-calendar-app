@@ -962,14 +962,15 @@ button { font: inherit; color: inherit; }
     const payload = serialize();
     lastCode = encodePayload(payload);
     const st = $("#submitStatus");
+    const showCode = (on) => { $("#submitBackup").hidden = !on; $("#submitCode").hidden = !on; $("#copyCodeBtn").hidden = !on; };
     $("#submitId").textContent = state.candidate; $("#submitCode").value = lastCode; $("#submitModal").hidden = false;
-    st.className = "submit-status"; st.textContent = "Saving\u2026";
-    if (!hasBackend()) { st.className = "submit-status"; st.textContent = "Copy the code below and send it to us. It contains your calendar and your anonymous candidate ID, nothing else."; return; }
+    st.className = "submit-status"; st.textContent = "Saving\u2026"; showCode(false);
+    if (!hasBackend()) { st.className = "submit-status"; st.textContent = "Copy the code below and send it to us. It contains your calendar and your anonymous candidate ID, nothing else."; showCode(true); return; }
     try {
       await postSubmission(payload);
       st.className = "submit-status ok"; st.textContent = "\u2713 Saved. Your calendar has been sent to the hiring team. You can close this window.";
     } catch (e) {
-      st.className = "submit-status bad"; st.textContent = "We couldn\u2019t save this automatically. Please copy the code below and send it to us.";
+      st.className = "submit-status bad"; st.textContent = "We couldn\u2019t save this automatically. Please copy the code below and send it to us."; showCode(true);
     }
   });
   $("#submitCloseBtn").addEventListener("click", () => { $("#submitModal").hidden = true; });
