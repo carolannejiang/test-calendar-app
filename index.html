@@ -20,17 +20,14 @@
 <div class="shell">
   <aside class="review-side" id="reviewSide" hidden>
     <h2>Review submissions</h2>
-    <p class="sub">Paste a submission code or review link from a candidate.</p>
-    <textarea id="reviewInput" placeholder="C1.N4IgzgpgTgLg..." aria-label="Submission code"></textarea>
-    <div class="load"><button class="btn primary" id="reviewLoad">Load</button><button class="btn" id="reviewSeed">Starting calendar</button></div>
-    <div class="err" id="reviewErr" hidden></div>
+    <div class="load"><button class="btn" id="reviewSeed">Starting calendar</button></div>
     <div class="server-row"><span id="serverStatus" class="server-status"></span><button class="btn quiet" id="serverRefresh" hidden>Refresh</button></div>
     <input type="search" id="subSearch" class="sub-search" placeholder="Search candidate ID" autocomplete="off" aria-label="Search submissions by candidate ID">
     <ul class="sublist" id="subList"></ul>
     <p class="sub" id="subEmpty" hidden>No loaded submissions match that candidate ID.</p>
     <button class="btn" id="serverMore" hidden>Load more submissions</button>
     <div class="changes" id="changes"></div>
-    <div class="foot">Backup codes stay in this browser. Refresh updates server submissions. <a href="#" id="exitReview">Exit reviewer view</a></div>
+    <div class="foot"><a href="#" id="reviewCodeOpen">Review from submission code here</a>. Backup codes stay in this browser. Refresh updates server submissions. <a href="#" id="exitReview">Exit reviewer view</a></div>
   </aside>
 
   <div id="app">
@@ -115,6 +112,15 @@
   </div>
 </div>
 
+<div class="scrim" id="codeModal" hidden>
+  <div class="modal" role="dialog" aria-label="Review from submission code">
+    <h2>Review from submission code</h2>
+    <p>Paste a submission code or review link from a candidate.</p>
+    <textarea id="reviewInput" placeholder="C1.N4IgzgpgTgLg..." aria-label="Submission code"></textarea>
+    <div class="err" id="reviewErr" hidden></div>
+    <div class="actions"><button class="btn" id="reviewCodeCancel">Cancel</button><button class="btn primary" id="reviewLoad">Load</button></div>
+  </div>
+</div>
 <div class="scrim" id="gateModal" hidden>
   <div class="modal" role="dialog" aria-label="Start the test">
     <h2>Ready to start?</h2>

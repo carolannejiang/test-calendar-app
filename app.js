@@ -404,7 +404,7 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
     if (!popup.hidden) closePopup(false);
-    $("#instrModal").hidden = true;
+    $("#instrModal").hidden = true; $("#codeModal").hidden = true;
     if (!$("#notesModal").hidden) closeNotesModal();
   });
   document.addEventListener("pointerdown", (ev) => {
@@ -748,7 +748,7 @@
   }
   function exitReview() {
     if (!review.on) return;
-    review.on = false; review.request++; review.loading = false;
+    review.on = false; review.request++; review.loading = false; $("#codeModal").hidden = true;
     state.readOnly = false; state.compareSeed = true;
     $("#reviewNavigation").hidden = true;
     document.body.classList.remove("readonly");
@@ -762,10 +762,16 @@
     render();
     if (submitted) showSubmitted(); else if (gated) showGate();
   }
+  function openCodeModal(error) {
+    const err = $("#reviewErr"); err.hidden = !error; err.textContent = error || "";
+    $("#codeModal").hidden = false; $("#reviewInput").focus();
+  }
+  $("#reviewCodeOpen").addEventListener("click", (event) => { event.preventDefault(); $("#reviewInput").value = ""; openCodeModal(); });
+  $("#reviewCodeCancel").addEventListener("click", () => { $("#codeModal").hidden = true; });
+  $("#codeModal").addEventListener("click", (ev) => { if (ev.target === ev.currentTarget) ev.currentTarget.hidden = true; });
   $("#reviewLoad").addEventListener("click", () => {
-    const err = $("#reviewErr"); err.hidden = true;
-    try { reviewLoadCode($("#reviewInput").value); $("#reviewInput").value = ""; }
-    catch (error) { err.textContent = "Could not read that code: " + error.message; err.hidden = false; }
+    try { reviewLoadCode($("#reviewInput").value); $("#reviewInput").value = ""; $("#codeModal").hidden = true; $("#reviewErr").hidden = true; }
+    catch (error) { openCodeModal("Could not read that code: " + error.message); }
   });
   $("#reviewSeed").addEventListener("click", reviewShowSeed);
   $("#exitReview").addEventListener("click", (event) => {
@@ -781,7 +787,7 @@
     const reviewing = !!match || location.hash === "#review" || new URLSearchParams(location.search).has("review");
     if (reviewing) {
       try { enterReview(match && match[1]); }
-      catch (error) { $("#reviewErr").textContent = error.message; $("#reviewErr").hidden = false; }
+      catch (error) { openCodeModal(error.message); }
       if (match) history.replaceState(null, "", location.href.split("#")[0] + "#review");
     } else if (review.on) exitReview();
   }

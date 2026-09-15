@@ -268,3 +268,25 @@ test("candidate search filters the loaded submission list without losing the sel
   assert.equal(ui.document.querySelector("#subList button.active b").textContent, "ABCDEF");
   assert.equal(ui.errors.length, 0);
 });
+
+test("submission codes are pasted in a modal opened from the footer link", async t => {
+  const ui = app({ review: true }); t.after(ui.close); await flush();
+  const modal = ui.document.querySelector("#codeModal");
+  assert.equal(modal.hidden, true);
+  assert.equal(ui.document.querySelector("#reviewSide #reviewInput"), null);
+  ui.document.querySelector("#reviewCodeOpen").click();
+  assert.equal(modal.hidden, false);
+  ui.document.querySelector("#reviewInput").value = "not a code";
+  ui.document.querySelector("#reviewLoad").click();
+  assert.equal(modal.hidden, false);
+  assert.match(ui.document.querySelector("#reviewErr").textContent, /Could not read that code/);
+  ui.document.querySelector("#reviewInput").value = encodePayload(payload());
+  ui.document.querySelector("#reviewLoad").click();
+  assert.equal(modal.hidden, true);
+  assert.equal(ui.document.querySelector("#reviewInput").value, "");
+  assert.match(ui.document.querySelector("#reviewBanner").textContent, /Candidate ABCDEF/);
+  ui.document.querySelector("#reviewCodeOpen").click();
+  ui.document.querySelector("#reviewCodeCancel").click();
+  assert.equal(modal.hidden, true);
+  assert.equal(ui.errors.length, 0);
+});
