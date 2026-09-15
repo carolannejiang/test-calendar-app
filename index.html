@@ -85,14 +85,15 @@
 </div>
 
 <div class="scrim" id="submitModal" hidden>
-  <div class="modal" role="dialog" aria-label="Submit your calendar">
-    <h2>Submit your calendar</h2>
-    <p class="submit-status" id="submitStatus">Saving&hellip;</p>
+  <div class="modal" role="dialog" aria-labelledby="submitTitle">
+    <h2 id="submitTitle">Submitting your response&hellip;</h2>
+    <p class="submit-status" id="submitStatus"></p>
+    <p class="submit-backup">Your candidate ID:</p>
     <div class="code-id" id="submitId"></div>
     <p class="submit-backup" id="submitBackup">Backup code, in case we ask for it:</p>
     <textarea id="submitCode" readonly aria-label="Submission code"></textarea>
     <div class="actions">
-      <button class="btn" id="submitCloseBtn">Close</button>
+      <button class="btn" id="retryBtn" hidden>Try again</button>
       <button class="btn primary" id="copyCodeBtn">Copy code</button>
     </div>
   </div>

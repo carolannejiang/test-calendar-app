@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { app, response, flush, payload, serverPayload, scenario, KEY } = require("./helpers.cjs");
-const { encodePayload } = require("../shared/submission");
+const { app, response, flush, payload, serverPayload, scenario, KEY, SUBMITTED_KEY } = require("./helpers.cjs");
+const { encodePayload, decodePayload } = require("../shared/submission");
 
 test("page initializes in standards mode and rejects an injected backup code", async t => {
   const ui = app({ review: true }); t.after(ui.close); await flush();
@@ -96,7 +96,39 @@ test("notes bullets persist and submission uses the local backend", async t => {
   ui.document.querySelector("#submitBtn").click(); await flush();
   assert.equal(ui.calls[0].url, "/api/submit");
   assert.equal(JSON.parse(ui.calls[0].options.body).d["2026-09-14"], "• Reason\n•");
-  assert.equal(ui.document.querySelector("#submitBtn").disabled, false);
+  assert.equal(ui.document.querySelector("#submitTitle").textContent, "Your response has been submitted.");
+  assert.equal(ui.document.querySelector("#submitCode").hidden, true);
+  assert.equal(ui.document.querySelector("#submitBtn").hidden, true);
+  assert.equal(JSON.parse(ui.window.localStorage.getItem(SUBMITTED_KEY)).saved, true);
+});
+
+test("submitting locks the calendar and the lock survives a reload under the same candidate ID", async t => {
+  const ui = app(); t.after(ui.close);
+  ui.document.querySelector("#submitBtn").click(); await flush();
+  assert.equal(ui.document.querySelector("#submitModal").hidden, false);
+  ui.document.dispatchEvent(new ui.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  ui.document.querySelector("#submitModal").click();
+  assert.equal(ui.document.querySelector("#submitModal").hidden, false);
+  ui.document.querySelector('.ev[data-id="mon1"]').dispatchEvent(new ui.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(ui.document.querySelector("#popup").hidden, true);
+  assert.equal(ui.document.querySelector('#dayNotes textarea[data-date="2026-09-14"]').disabled, true);
+  ui.document.querySelector("#submitBtn").click(); await flush();
+  assert.equal(ui.calls.length, 1);
+  const lock = JSON.parse(ui.window.localStorage.getItem(SUBMITTED_KEY));
+  const candidate = ui.document.querySelector("#candidateId").textContent;
+  assert.equal(lock.candidate, candidate);
+  assert.equal(decodePayload(lock.code).c, candidate);
+
+  const again = app({ draft: JSON.parse(ui.window.localStorage.getItem(KEY)), submitted: lock, unlocked: false }); t.after(again.close);
+  assert.equal(again.document.querySelector("#candidateId").textContent, candidate);
+  assert.equal(again.document.querySelector("#gateModal").hidden, true);
+  assert.equal(again.document.querySelector("#submitModal").hidden, false);
+  assert.equal(again.document.querySelector("#submitTitle").textContent, "Your response has been submitted.");
+  assert.equal(again.document.querySelector("#submitBtn").hidden, true);
+  assert.equal(again.document.body.classList.contains("readonly"), true);
+  for (const timer of again.timers.filter(timer => timer.ms === 1000)) timer.callback();
+  assert.equal(JSON.parse(again.window.localStorage.getItem(KEY)).activeSec, lock.activeSec || 0);
+  assert.equal(again.errors.length, 0);
 });
 
 test("blocked local storage still opens the gate and calendar without startup exceptions", t => {
@@ -142,13 +174,24 @@ test("cancelling reviewer login restores the start gate without starting the tim
   assert.equal(JSON.parse(ui.window.localStorage.getItem(KEY)).openedAt, null);
 });
 
-test("network failure exposes a valid backup code", async t => {
-  const ui = app({ fetch: async () => { throw new Error("Offline"); } }); t.after(ui.close);
+test("network failure keeps the lock, exposes a valid backup code, and allows a retry", async t => {
+  let online = false;
+  const ui = app({ fetch: async () => { if (!online) throw new Error("Offline"); return response({ ok: true, id: "01234567-89ab-4cde-8fab-0123456789ab" }, 201); } });
+  t.after(ui.close);
   ui.document.querySelector("#submitBtn").click(); await flush();
   assert.equal(ui.document.querySelector("#submitCode").hidden, false);
   assert.equal(ui.document.querySelector("#copyCodeBtn").hidden, false);
+  assert.equal(ui.document.querySelector("#retryBtn").hidden, false);
   assert.match(ui.document.querySelector("#submitCode").value, /^B1\./);
-  assert.equal(ui.document.querySelector("#submitBtn").disabled, false);
+  assert.equal(ui.document.querySelector("#submitBtn").hidden, true);
+  assert.equal(JSON.parse(ui.window.localStorage.getItem(SUBMITTED_KEY)).saved, false);
+  online = true;
+  ui.document.querySelector("#retryBtn").click(); await flush();
+  assert.equal(ui.calls.length, 2);
+  assert.equal(ui.calls[1].options.body, ui.calls[0].options.body);
+  assert.equal(ui.document.querySelector("#submitTitle").textContent, "Your response has been submitted.");
+  assert.equal(ui.document.querySelector("#retryBtn").hidden, true);
+  assert.equal(JSON.parse(ui.window.localStorage.getItem(SUBMITTED_KEY)).saved, true);
 });
 
 test("reviewer dialog cancels pending checks and reopens without stale handlers", async t => {

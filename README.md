@@ -2,7 +2,7 @@
 
 A Google Calendar–style week view used to administer scheduling work tests during hiring.
 
-Candidates edit the starting calendar, write their reasoning, and click **Submit**. Responses are saved to a private backend. If saving fails, the page provides a backup code that contains the response. Reviewers enter their password to browse submissions, changes, notes, and reported time spent.
+Candidates edit the starting calendar, write their reasoning, and click **Submit**. Responses are saved to a private backend. If saving fails, the page provides a backup code that contains the response and a retry button. Once Submit is confirmed, the response is locked for that candidate ID: the calendar becomes read-only, the page shows "Your response has been submitted", and this persists across reloads in the same browser. Reviewers enter their password to browse submissions, changes, notes, and reported time spent.
 
 Live: https://test-calendar-app.vercel.app · Reviewer view: https://test-calendar-app.vercel.app/?review (or /#review)
 
@@ -75,3 +75,5 @@ Change comparisons are only shown when a response's scenario name matches this i
 Edit `scenario.js`. **Change the scenario name whenever starting events, dates, or hours change**, so old browser drafts are not reused and historical submissions are not compared against a changed baseline. Keep a copy of the previous scenario configuration if you need its original change comparisons later.
 
 Candidate progress is saved in browser storage. When storage is blocked or full, the app continues in memory and tells the candidate to keep the page open until submitting. Closing that page cannot preserve an in-memory draft.
+
+The submission lock is also stored per scenario name, so changing the scenario unlocks returning browsers with a fresh candidate ID. Opening the page with `#reset` clears the draft, the start gate, and the lock, which issues a new candidate ID.
