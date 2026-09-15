@@ -9,7 +9,9 @@
   "use strict";
   const { MAX_BYTES, COLORS, ValidationError, isDate } = submission;
   const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-  const MAX_SLUG = 60, MAX_TITLE = 80;
+  const MAX_SLUG = 60, MAX_TITLE = 80, MAX_PASSWORD = 80;
+  // The popup's notes field edits this line in build mode, so the browser enforces the same limit.
+  const MAX_DETAIL = 500;
   const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
   function check(condition, message) {
     if (!condition) throw new ValidationError(message);
@@ -32,7 +34,7 @@
     if (new TextEncoder().encode(JSON.stringify(p)).length > MAX_BYTES) throw new ValidationError("Test too large", 413);
     const title = text(p.title, MAX_TITLE, "test title").trim();
     check(title.length > 0, "Missing test title");
-    const password = text(p.password ?? "", MAX_TITLE, "activation password").trim();
+    const password = text(p.password ?? "", MAX_PASSWORD, "activation password").trim();
     check(typeof p.slug === "string" && p.slug.length <= MAX_SLUG && SLUG_RE.test(p.slug), "Invalid test slug");
     const revision = p.revision === undefined ? 1 : p.revision;
     check(Number.isSafeInteger(revision) && revision >= 1, "Invalid test revision");
@@ -47,11 +49,11 @@
       const color = e.color === undefined ? "blue" : e.color;
       check(COLORS.includes(color), "Invalid event color");
       return { id: e.id, title: text(e.title ?? "", 500, "event title"), date: e.date, start: e.start, end: e.end, color,
-        detail: text(e.detail ?? "", 500, "event detail") };
+        detail: text(e.detail ?? "", MAX_DETAIL, "event detail") };
     });
     // The revision changes whenever the starting calendar is saved, so candidate drafts and
     // submission comparisons never mix baselines (see "Changing scenarios" in the README).
     return { slug: p.slug, title, password, revision, events };
   }
-  return { SLUG_RE, slugify, parseTest };
+  return { SLUG_RE, MAX_PASSWORD, MAX_DETAIL, slugify, parseTest };
 });

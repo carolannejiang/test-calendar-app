@@ -62,6 +62,7 @@ button { font: inherit; color: inherit; }
 .shell { display: flex; height: 100vh; width: 100%; }
 #app { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; height: 100%; }
 
+/* ---------- top bar ---------- */
 .topbar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 10px 16px; border-bottom: 1px solid var(--line);
@@ -94,6 +95,7 @@ button { font: inherit; color: inherit; }
 .timer svg { width: 18px; height: 18px; fill: var(--muted); }
 .timer-toggle { height: 28px; padding: 0 8px; font-size: 12px; font-weight: 400; color: var(--muted); }
 
+/* ---------- calendar ---------- */
 .cal { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; user-select: none; }
 .grid {
   position: relative; display: grid; grid-template-columns: var(--gutter) repeat(7, minmax(0, 1fr));
@@ -165,6 +167,7 @@ button { font: inherit; color: inherit; }
 .foot textarea:focus { outline: none; background: var(--bg-soft); }
 .foot textarea:disabled { color: var(--text-2); opacity: 1; }
 
+/* ---------- events ---------- */
 .ev {
   position: absolute; left: 2px; right: 4px; overflow: hidden;
   border-radius: 6px; padding: 2px 6px 2px 8px; cursor: pointer;
@@ -205,6 +208,7 @@ button { font: inherit; color: inherit; }
 .readonly .daycol, .readonly .allday, .readonly .ev { cursor: default; }
 .readonly .ev .resize { display: none; }
 
+/* ---------- popup ---------- */
 .popup {
   position: fixed; z-index: 20; width: 400px; max-width: calc(100vw - 24px);
   background: var(--card); color: var(--text); border-radius: 10px; box-shadow: var(--shadow);
@@ -234,6 +238,7 @@ button { font: inherit; color: inherit; }
 .popup textarea:focus { border-color: var(--accent); outline: none; }
 .popup .actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* ---------- modal ---------- */
 .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal { background: var(--card); color: var(--text); border-radius: 12px; box-shadow: var(--shadow); width: 100%; max-width: 520px; padding: 20px 24px 24px; }
 .modal h2 { margin: 0 0 8px; font-size: 20px; font-weight: 500; }
@@ -264,6 +269,7 @@ button { font: inherit; color: inherit; }
 .toast.show { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
 
+/* ---------- reviewer ---------- */
 .review-side {
   flex: 0 0 340px; max-width: 100%; border-right: 1px solid var(--line); background: var(--bg-soft);
   display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 16px;

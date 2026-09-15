@@ -32,6 +32,7 @@ test("Unicode and existing v1 tuple fields round-trip through both backup codecs
     const code = submission.encodePayload(p, library);
     assert.deepEqual(submission.decodePayload("https://example.test/#review=" + code, library), submission.parseSubmission(p));
   }
+  // A v1 B1 code created without the new encoder remains readable.
   assert.deepEqual(submission.decodePayload("B1." + Buffer.from(JSON.stringify(p)).toString("base64url")), submission.parseSubmission(p));
 });
 
@@ -61,6 +62,7 @@ test("refresh replaces server cache, keeps imports and sorts by server receipt",
   assert.equal(submissionKey(sortSubmissions([old, newer])[0]), newer.id);
   const merged = mergeSubmissions([payload()], [old]);
   assert.equal(merged.length, 1); assert.equal(merged[0].id, old.id);
+  // Two server records remain distinct even if the candidate supplied the same timestamp.
   assert.equal(mergeSubmissions([old], [{ ...old, id: newer.id }]).length, 2);
 });
 
