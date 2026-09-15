@@ -1138,7 +1138,7 @@ button { font: inherit; color: inherit; }
     catch (e) { err.textContent = "Could not read that code. Paste the full code exactly as the candidate sent it."; err.hidden = false; }
   });
   $("#reviewSeed").addEventListener("click", reviewShowSeed);
-  $("#exitReview").addEventListener("click", (ev) => { ev.preventDefault(); exitReview(); });
+  $("#exitReview").addEventListener("click", (ev) => { ev.preventDefault(); exitReview(); if (location.hash) history.replaceState(null, "", location.href.split("#")[0]); });
 
 
   $("#candidateId").textContent = state.candidate;
@@ -1146,6 +1146,12 @@ button { font: inherit; color: inherit; }
   const hashCode = location.hash.match(/^#review=(.+)$/);
   if (hashCode) { enterReview(hashCode[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }
   else if (location.hash === "#review") enterReview();
+  window.addEventListener("hashchange", () => {
+    const m2 = location.hash.match(/^#review=(.+)$/);
+    if (m2) { enterReview(m2[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }
+    else if (location.hash === "#review") enterReview();
+    else if (review.on) exitReview();
+  });
 
 })();
 </script>
