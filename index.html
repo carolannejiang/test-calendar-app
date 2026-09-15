@@ -229,7 +229,7 @@ button { font: inherit; color: inherit; }
 
 /* ---------- popup ---------- */
 .popup {
-  position: fixed; z-index: 20; width: 340px; max-width: calc(100vw - 24px);
+  position: fixed; z-index: 20; width: 400px; max-width: calc(100vw - 24px);
   background: var(--card); color: var(--text); border-radius: 10px; box-shadow: var(--shadow);
   padding: 12px 16px 16px;
 }
@@ -248,6 +248,12 @@ button { font: inherit; color: inherit; }
 .popup select:focus, .popup input[type="date"]:focus { border-color: var(--accent); outline: none; }
 .popup .dash { color: var(--muted); }
 .popup label.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); margin-bottom: 14px; }
+.popup .notes-label { display: block; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 4px 0 4px; }
+.popup textarea {
+  width: 100%; min-height: 64px; resize: vertical; font: inherit; color: var(--text);
+  background: var(--field); border: 1px solid transparent; border-radius: 6px; padding: 8px; margin-bottom: 12px;
+}
+.popup textarea:focus { border-color: var(--accent); outline: none; }
 .popup .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .popup .arrow { display: none; }
 
@@ -301,6 +307,8 @@ button { font: inherit; color: inherit; }
 .changes li.moved .k { background: var(--ev-blue-fill); color: var(--ev-blue-ink); }
 .changes li.deleted .k { background: var(--ev-red-fill); color: var(--ev-red-ink); }
 .changes li.renamed .k { background: var(--ev-purple-fill); color: var(--ev-purple-ink); }
+.changes li.notes .k { background: var(--ev-orange-fill); color: var(--ev-orange-ink); }
+.changes li .from { white-space: pre-wrap; }
 .changes .none { color: var(--muted); font-size: 13px; }
 .changes .from { color: var(--muted); }
 .review-side .foot { margin-top: auto; padding-top: 16px; font-size: 12px; color: var(--muted); }
@@ -358,6 +366,8 @@ button { font: inherit; color: inherit; }
     <span class="dash">&ndash;</span>
     <select id="popEnd" aria-label="End time"></select>
   </div>
+  <label class="notes-label" for="popNotes">Additional notes or reasoning</label>
+  <textarea id="popNotes" placeholder="Optional: why you scheduled it this way, anything the reviewer should know"></textarea>
   <div class="actions">
     <button class="btn primary" id="popSave">Save</button>
   </div>
@@ -414,7 +424,7 @@ button { font: inherit; color: inherit; }
   const COLORS = ["blue", "green", "purple", "red", "orange", "gray"];
 
   function normalize(e) {
-    const out = { id: e.id || uid(), title: e.title || "", date: e.date, allDay: false,
+    const out = { id: e.id || uid(), title: e.title || "", notes: e.notes || "", date: e.date, allDay: false,
       start: mins(e.start, 540), end: mins(e.end, 600),
       color: COLORS.includes(e.color) ? e.color : "blue" };
     if (!out.allDay) {
@@ -466,7 +476,7 @@ button { font: inherit; color: inherit; }
   // ---------- DOM refs ----------
   const cal = $("#cal"), grid = $("#grid"), dayHeads = $("#dayHeads");
   const popup = $("#popup");
-  const popTitle = $("#popTitle"), popDate = $("#popDate"), popStart = $("#popStart"), popEnd = $("#popEnd");
+  const popTitle = $("#popTitle"), popDate = $("#popDate"), popStart = $("#popStart"), popEnd = $("#popEnd"), popNotes = $("#popNotes");
   let toastTimer;
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800); }
 
@@ -520,7 +530,7 @@ button { font: inherit; color: inherit; }
       if (e._cols > 1) { const w = 100 / e._cols; n.style.left = `calc(${w * e._col}% + 2px)`; n.style.width = `calc(${w}% - 5px)`; n.style.right = "auto"; }
       n.innerHTML = `<span class="t"></span><span class="w"></span><div class="resize"></div>`;
       n.querySelector(".t").textContent = title; n.querySelector(".w").textContent = fmtRange(e.start, e.end);
-      n.title = `${title}\n${fmtRange(e.start, e.end)}`;
+      n.title = `${title}\n${fmtRange(e.start, e.end)}` + (e.notes ? `\n\n${e.notes}` : "");
     }
     return n;
   }
@@ -615,11 +625,11 @@ button { font: inherit; color: inherit; }
       if (d.moved) {
         const m = snap(minuteAt(ev.clientY), 15);
         const a = Math.min(d.m0, m), b = Math.max(d.m0, m);
-        const e = { id: uid(), title: "", date: d.date, allDay: false, start: clamp(a, DAY_START, DAY_END - 15), end: clamp(Math.max(b, a + 15), DAY_START + 15, DAY_END), color: "blue", _new: true };
+        const e = { id: uid(), title: "", date: d.date, allDay: false, start: clamp(a, DAY_START, DAY_END - 15), end: clamp(Math.max(b, a + 15), DAY_START + 15, DAY_END), color: "blue", notes: "", _new: true };
         state.events.push(e); render(); openPopup(e.id);
       } else {
         const s = clamp(Math.floor(d.m0 / 30) * 30, DAY_START, DAY_END - 30);
-        const e = { id: uid(), title: "", date: d.date, allDay: false, start: s, end: Math.min(s + 60, DAY_END), color: "blue", _new: true };
+        const e = { id: uid(), title: "", date: d.date, allDay: false, start: s, end: Math.min(s + 60, DAY_END), color: "blue", notes: "", _new: true };
         state.events.push(e); render(); openPopup(e.id);
       }
     } else if (d.kind === "move" || d.kind === "resize") {
@@ -642,7 +652,7 @@ button { font: inherit; color: inherit; }
   function openPopup(id) {
     const e = evById(id); if (!e) return;
     popId = id; state.selected = id;
-    popTitle.value = e.title; popDate.value = e.date;
+    popTitle.value = e.title; popNotes.value = e.notes || ""; popDate.value = e.date;
     popStart.value = e.start; popEnd.value = e.end;
     popup.hidden = false;
     render();
@@ -658,7 +668,7 @@ button { font: inherit; color: inherit; }
     if (popup.hidden) return;
     const e = evById(popId);
     if (e && save) {
-      e.title = popTitle.value.trim(); e.date = popDate.value || e.date;
+      e.title = popTitle.value.trim(); e.notes = popNotes.value.trim(); e.date = popDate.value || e.date;
       e.start = +popStart.value; e.end = +popEnd.value; if (e.end <= e.start) e.end = Math.min(DAY_END, e.start + 30);
       delete e._new;
       persist(); toast("Saved");
@@ -713,7 +723,7 @@ button { font: inherit; color: inherit; }
   }
   function serialize() {
     return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(), o: state.openedAt, a: state.activeSec,
-      e: state.events.map((e) => [e.id, e.title, e.date, e.start, e.end, e.allDay ? 1 : 0, e.color]) };
+      e: state.events.map((e) => [e.id, e.title, e.date, e.start, e.end, e.allDay ? 1 : 0, e.color, e.notes || ""]) };
   }
   async function copy(text, label) {
     try { await navigator.clipboard.writeText(text); toast(label + " copied"); }
@@ -741,8 +751,9 @@ button { font: inherit; color: inherit; }
       const timeChanged = n.date !== s.date || n.allDay !== s.allDay || n.start !== s.start || n.end !== s.end;
       if (timeChanged) out.push({ kind: "moved", text: `${n.title || "(No title)"} \u2192 ${when(n)}`, from: `was ${when(s)}` });
       if (n.title !== s.title) out.push({ kind: "renamed", text: `"${s.title || "(No title)"}" \u2192 "${n.title || "(No title)"}"` });
+      if ((n.notes || "") !== (s.notes || "")) out.push({ kind: "notes", text: `${n.title || "(No title)"}`, from: n.notes || "(notes removed)" });
     }
-    for (const n of evs) if (!seedById[n.id]) out.push({ kind: "added", text: `${n.title || "(No title)"}`, from: when(n) });
+    for (const n of evs) if (!seedById[n.id]) out.push({ kind: "added", text: `${n.title || "(No title)"}`, from: when(n) + (n.notes ? ` \u00b7 Notes: ${n.notes}` : "") });
     return out;
   }
   function renderChanges(evs, label) {
@@ -766,7 +777,7 @@ button { font: inherit; color: inherit; }
   }
   function reviewShowSub(i) {
     review.active = i; const p = review.subs[i];
-    state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue" }));
+    state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue", notes: a[7] || "" }));
     const t = toDate(SCENARIO.today); state.weekStart = addDays(t, -t.getDay());
     render(); reviewRenderList();
     banner.hidden = false;
