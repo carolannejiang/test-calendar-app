@@ -1,8 +1,9 @@
-// Private Blob storage. The SDK reads BLOB_READ_WRITE_TOKEN from the environment.
 const { createHash, timingSafeEqual } = require("node:crypto");
 const { put, get, list, del } = require("@vercel/blob");
 const { parseSubmission, ValidationError, isSubmissionId } = require("../shared/submission");
+const { parseTest, SLUG_RE } = require("../shared/test");
 const PREFIX = "submissions/";
+const TESTS = "tests/";
 const PAGE_SIZE = 50;
 const READ_CONCURRENCY = 8;
 
@@ -45,27 +46,35 @@ function decodeCursor(cursor) {
 }
 const compareBlobs = (a, b) => b.time - a.time || a.path.localeCompare(b.path);
 
-async function listSubmissions({ cursor } = {}) {
-  configured();
-  const boundary = decodeCursor(cursor);
-  // List lightweight metadata to find the newest page; download only that page's bodies.
+async function listBlobs(prefix) {
   const blobs = [];
   let storageCursor;
   do {
-    const page = await list({ prefix: PREFIX, limit: 1000, cursor: storageCursor });
+    const page = await list({ prefix, limit: 1000, cursor: storageCursor });
     blobs.push(...page.blobs.map(blob => ({ path: blob.pathname, time: new Date(blob.uploadedAt).getTime() })));
     storageCursor = page.hasMore ? page.cursor : undefined;
   } while (storageCursor);
-  const remaining = blobs.sort(compareBlobs).filter(blob => !boundary || compareBlobs(blob, boundary) > 0);
-  const page = remaining.slice(0, PAGE_SIZE);
-  const submissions = new Array(page.length);
+  return blobs;
+}
+async function readAll(paths, read) {
+  const results = new Array(paths.length);
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, page.length) }, async () => {
-    while (next < page.length) {
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, paths.length) }, async () => {
+    while (next < paths.length) {
       const index = next++;
-      submissions[index] = await readSubmission(page[index].path);
+      results[index] = await read(paths[index]);
     }
   }));
+  return results;
+}
+
+async function listSubmissions({ cursor } = {}) {
+  configured();
+  const boundary = decodeCursor(cursor);
+  const blobs = await listBlobs(PREFIX);
+  const remaining = blobs.sort(compareBlobs).filter(blob => !boundary || compareBlobs(blob, boundary) > 0);
+  const page = remaining.slice(0, PAGE_SIZE);
+  const submissions = await readAll(page.map(blob => blob.path), readSubmission);
   return {
     submissions: submissions.filter(Boolean),
     cursor: remaining.length > PAGE_SIZE ? Buffer.from(JSON.stringify(page[page.length - 1])).toString("base64url") : null,
@@ -78,9 +87,45 @@ async function deleteSubmission(id) {
   await del(PREFIX + id + ".json");
 }
 
+async function saveTest(test, { overwrite = false } = {}) {
+  configured();
+  await put(TESTS + test.slug + ".json", JSON.stringify(test), {
+    access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: overwrite,
+  });
+}
+
+async function readTest(slug) {
+  configured();
+  if (!SLUG_RE.test(slug)) return null;
+  const response = await get(TESTS + slug + ".json", { access: "private", useCache: false });
+  if (!response || response.statusCode !== 200) return null;
+  const json = await new Response(response.stream).text();
+  try { return parseTest(json); }
+  catch (error) {
+    if (error instanceof ValidationError) return null;
+    throw error;
+  }
+}
+
+async function readAllTests() {
+  configured();
+  const slugs = (await listBlobs(TESTS)).map(blob => blob.path.slice(TESTS.length, -5));
+  return (await readAll(slugs, readTest)).filter(Boolean).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+async function listTests() {
+  return (await readAllTests()).map(({ slug, title, password }) => ({ slug, title, password }));
+}
+
+const digest = text => createHash("sha256").update(text, "utf8").digest();
+// Candidates activate a test by password alone, so compare without leaking timing.
+async function findTestByPassword(password) {
+  return (await readAllTests()).find(test => test.password && timingSafeEqual(digest(test.password), digest(password))) || null;
+}
+
 function cors(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Reviewer-Password");
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") { res.status(204).end(); return true; }
@@ -91,7 +136,6 @@ function requireReviewer(req) {
   const expected = process.env.REVIEWER_PASSWORD;
   if (!expected) throw new ValidationError("REVIEWER_PASSWORD is not set on the server", 503);
   const given = req.headers["x-reviewer-password"];
-  const digest = text => createHash("sha256").update(text, "utf8").digest();
   if (typeof given !== "string" || !timingSafeEqual(digest(given), digest(expected))) {
     throw new ValidationError("Wrong reviewer password", 401);
   }
@@ -102,4 +146,4 @@ function fail(res, error) {
   return res.status(error.status || 500).json({ ok: false, error: error.status ? error.message : "Server error" });
 }
 
-module.exports = { saveSubmission, listSubmissions, deleteSubmission, cors, requireReviewer, fail };
+module.exports = { saveSubmission, listSubmissions, deleteSubmission, saveTest, readTest, listTests, findTestByPassword, cors, requireReviewer, fail };

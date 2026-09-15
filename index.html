@@ -10,6 +10,7 @@
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
   <script defer src="scenario.js"></script>
   <script defer src="shared/submission.js"></script>
+  <script defer src="shared/test.js"></script>
   <script defer src="shared/calendar.js"></script>
   <script defer src="shared/review.js"></script>
   <script defer src="shared/storage.js"></script>
@@ -19,6 +20,29 @@
 <body>
 <div class="shell">
   <aside class="review-side" id="reviewSide" hidden>
+    <h2>Tests</h2>
+    <p class="sub" id="testCurrent"></p>
+    <div id="testTools" hidden>
+      <div class="load"><button class="btn" id="testEdit">Edit starting calendar</button></div>
+      <form class="load" id="testPassword">
+        <input type="text" id="testPasswordInput" class="sub-search plain" placeholder="New activation password" maxlength="80" autocomplete="off" aria-label="New activation password" required>
+        <button class="btn" type="submit" id="testPasswordBtn">Change</button>
+      </form>
+    </div>
+    <div class="load" id="testBuildTools" hidden>
+      <button class="btn primary" id="testSave">Save starting calendar</button>
+      <button class="btn" id="testCancel">Cancel</button>
+    </div>
+    <ul class="testlist" id="testList"></ul>
+    <form class="create" id="testCreate">
+      <input type="text" id="testTitle" class="sub-search plain" placeholder="New test title" maxlength="80" autocomplete="off" aria-label="New test title" required>
+      <div class="load">
+        <input type="text" id="testPasswordNew" class="sub-search plain" placeholder="Activation password" maxlength="80" autocomplete="off" aria-label="Activation password for the new test" required>
+        <button class="btn primary" type="submit" id="testCreateBtn">Create</button>
+      </div>
+    </form>
+    <div class="err" id="testErr" hidden></div>
+
     <h2>Review submissions</h2>
     <div class="load"><button class="btn" id="reviewSeed">Starting calendar</button></div>
     <div class="server-row"><span id="serverStatus" class="server-status"></span><button class="btn quiet" id="serverRefresh" hidden>Refresh</button></div>
@@ -74,7 +98,7 @@
     <select id="popEnd" aria-label="End time"></select>
   </div>
   <p class="err" id="popError" role="alert" hidden></p>
-  <label class="notes-label" for="popNotes">Additional notes or reasoning</label>
+  <label class="notes-label" for="popNotes" id="popNotesLabel">Additional notes or reasoning</label>
   <textarea id="popNotes" maxlength="20000" placeholder="Optional: why you scheduled it this way, anything the reviewer should know"></textarea>
   <div class="actions">
     <button class="btn primary" id="popSave">Save</button>
@@ -124,7 +148,7 @@
 <div class="scrim" id="gateModal" hidden>
   <div class="modal" role="dialog" aria-label="Start the test">
     <h2>Ready to start?</h2>
-    <p>Enter the password to open the test. The clock starts as soon as you continue, so only do this when you are ready.</p>
+    <p>Enter the activation password you were given to open your test. The clock starts as soon as you continue, so only do this when you are ready.</p>
     <input type="password" id="gateInput" class="pw-input" autocomplete="off" aria-label="Password">
     <div class="err" id="gateErr" hidden>That password is not correct.</div>
     <div class="actions"><button class="btn primary" id="gateStart">Start</button></div>

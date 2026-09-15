@@ -13,20 +13,23 @@ const payload = (overrides = {}) => ({ v: 1, c: "ABCDEF", s: scenario.name, t: "
 const serverPayload = (overrides = {}) => ({ ...payload(), id: "01234567-89ab-4cde-8fab-0123456789ab", receivedAt: "2026-09-15T10:00:00.000Z", ...overrides });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function app({ review = false, fetch, draft, submitted, blockedStorage = false, unlocked = true, reviewerUnlocked = true, digest } = {}) {
-  const errors = [], calls = [], alerts = [], timers = [];
+function app({ review = false, search = "", fetch, draft, submitted, storage = {}, blockedStorage = false, unlocked = true, reviewerUnlocked = true, digest } = {}) {
+  const errors = [], calls = [], alerts = [], timers = [], navigations = [];
   const virtualConsole = new VirtualConsole();
-  virtualConsole.on("jsdomError", error => errors.push(error));
+  virtualConsole.on("jsdomError", error => (/navigation/.test(error.message) ? navigations : errors).push(error));
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8").replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
-  const dom = new JSDOM(html, { url: "https://calendar-test.invalid/" + (review ? "#review" : ""), runScripts: "outside-only", virtualConsole });
+  const dom = new JSDOM(html, { url: "https://calendar-test.invalid/" + search + (review ? "#review" : ""), runScripts: "outside-only", virtualConsole });
   const window = dom.window;
   window.TextEncoder = TextEncoder; window.TextDecoder = TextDecoder;
   Object.defineProperty(window.crypto, "subtle", { value: digest ? { digest } : webcrypto.subtle });
   if (unlocked) window.localStorage.setItem("cal-test:opened:" + scenario.name, "1");
   if (draft) window.localStorage.setItem(KEY, JSON.stringify(draft));
   if (submitted) window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify(submitted));
-  if (reviewerUnlocked) window.sessionStorage.setItem("cal-test:reviewer-ok", scenario.reviewerPasswordHash);
-  window.sessionStorage.setItem("cal-test:reviewer-pw", "test-reviewer-password");
+  for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
+  if (reviewerUnlocked) {
+    window.sessionStorage.setItem("cal-test:reviewer-ok", scenario.reviewerPasswordHash);
+    window.sessionStorage.setItem("cal-test:reviewer-pw", "test-reviewer-password");
+  }
   if (blockedStorage) Object.defineProperty(window, "localStorage", { get() { throw new Error("Storage blocked"); } });
   window.setInterval = (callback, ms) => { timers.push({ callback, ms }); return timers.length; };
   window.confirm = () => true;
@@ -36,9 +39,9 @@ function app({ review = false, fetch, draft, submitted, blockedStorage = false, 
     if (fetch) return fetch(url, options);
     return response({ ok: true, submissions: [], cursor: null });
   };
-  const scripts = ["scenario.js", "shared/submission.js", "shared/calendar.js", "shared/review.js", "shared/storage.js", "shared/notes.js", "app.js"];
+  const scripts = ["scenario.js", "shared/submission.js", "shared/test.js", "shared/calendar.js", "shared/review.js", "shared/storage.js", "shared/notes.js", "app.js"];
   window.eval(scripts.map(file => fs.readFileSync(path.join(root, file), "utf8")).join("\n"));
-  return { window, document: window.document, errors, calls, alerts, timers, close: () => window.close() };
+  return { window, document: window.document, errors, calls, alerts, timers, navigations, close: () => window.close() };
 }
 function response(body, status = 200) { return { ok: status >= 200 && status < 300, status, json: async () => body }; }
 module.exports = { app, response, flush, event, payload, serverPayload, scenario, KEY, SUBMITTED_KEY };
