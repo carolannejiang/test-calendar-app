@@ -20,8 +20,7 @@
                    connected to the project, and a REVIEWER_PASSWORD
                    environment variable (see README).
    - reviewerPasswordHash: SHA-256 of the password that unlocks the
-                   reviewer view (#review). Default password is
-                   "reviewer2026". To change it, run in a terminal:
+                   reviewer view (#review). To change it, run in a terminal:
                      printf '%s' 'your-new-password' | shasum -a 256
                    and paste the hash here. Set to "" for no password.
    - events:       the starting calendar. Give every event a stable
@@ -41,7 +40,7 @@ const SCENARIO = {
   dayStart: "08:00",
   dayEnd: "19:00",
   apiBase: "https://test-calendar-app.vercel.app",
-  reviewerPasswordHash: "596ea2b4822da9258daa5437275db71496ee5d54cb7afa370f5c9d8c7363bd1c",
+  reviewerPasswordHash: "0a90d385aef07a5fd74c59c60ec803f554009f6ec0b88607d614b3f0e39dff2d",
   instructions:
     "Review the calendar and complete the scheduling task you were given. " +
     "When you are done, click Submit and send us the code it gives you.",

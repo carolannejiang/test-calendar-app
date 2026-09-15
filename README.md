@@ -16,7 +16,7 @@ Live: https://test-calendar-app.vercel.app · Reviewer view: https://test-calend
 ## One-time backend setup on Vercel
 
 1. **Storage.** In the Vercel dashboard open the project → **Storage** → **Create Database** → choose **Upstash for Redis** (Marketplace) → free plan → connect it to this project. This adds the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables.
-2. **Reviewer password.** Project → **Settings** → **Environment Variables** → add `REVIEWER_PASSWORD` for Production (and Preview if you use preview deployments). Use the same password whose SHA-256 hash is in `reviewerPasswordHash` in `index.html`. To make a new hash:
+2. **Reviewer password.** Project → **Settings** → **Environment Variables** → add `REVIEWER_PASSWORD` for Production (and Preview if you use preview deployments). Use the same password whose SHA-256 hash is in `reviewerPasswordHash` in `index.html` (the password itself is not stored in this repo). To make a new hash:
    ```bash
    printf '%s' 'your-new-password' | shasum -a 256
    ```
