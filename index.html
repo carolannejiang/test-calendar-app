@@ -12,6 +12,11 @@
                    range fills the window; nothing outside it is shown.
    - instructions: shown to the candidate behind the "Instructions"
                    button. Set to "" to hide the button.
+   - reviewerPasswordHash: SHA-256 of the password that unlocks the
+                   reviewer view (#review). Default password is
+                   "reviewer2026". To change it, run in a terminal:
+                     printf '%s' 'your-new-password' | shasum -a 256
+                   and paste the hash here. Set to "" for no password.
    - events:       the starting calendar. Give every event a stable
                    id so the reviewer view can tell moved/deleted
                    events from new ones. Times are 24h "HH:MM".
@@ -28,6 +33,7 @@ const SCENARIO = {
   timezone: "PDT",
   dayStart: "08:00",
   dayEnd: "19:00",
+  reviewerPasswordHash: "596ea2b4822da9258daa5437275db71496ee5d54cb7afa370f5c9d8c7363bd1c",
   instructions:
     "Review the calendar and complete the scheduling task you were given. " +
     "When you are done, click Submit and send us the code it gives you.",
@@ -313,6 +319,12 @@ button { font: inherit; color: inherit; }
   color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical;
   word-break: break-all;
 }
+.modal .pw-input {
+  width: 100%; font: 16px Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--text); background: var(--field);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+}
+.modal .pw-input:focus { border-color: var(--accent); outline: none; }
+.modal .err { color: var(--danger); font-size: 13px; margin-top: 8px; }
 .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .modal .code-id { font-size: 28px; font-weight: 700; letter-spacing: .12em; font-variant-numeric: tabular-nums; margin: 4px 0 12px; }
 .toast {
@@ -451,6 +463,16 @@ button { font: inherit; color: inherit; }
     <h2 id="notesModalTitle">Your reasoning or notes</h2>
     <textarea id="notesModalText" aria-label="Your reasoning or notes"></textarea>
     <div class="actions"><button class="btn primary" id="notesModalClose">Done</button></div>
+  </div>
+</div>
+
+<div class="scrim" id="pwModal" hidden>
+  <div class="modal" role="dialog" aria-label="Reviewer password">
+    <h2>Reviewer access</h2>
+    <p>Enter the reviewer password to open the review tools.</p>
+    <input type="password" id="pwInput" class="pw-input" autocomplete="current-password" aria-label="Reviewer password">
+    <div class="err" id="pwErr" hidden>That password is not correct.</div>
+    <div class="actions"><button class="btn" id="pwCancel">Cancel</button><button class="btn primary" id="pwUnlock">Unlock</button></div>
   </div>
 </div>
 
@@ -994,8 +1016,33 @@ button { font: inherit; color: inherit; }
     const i = review.subs.findIndex((x) => x.c === p.c && x.t === p.t);
     if (i < 0) { review.subs.unshift(p); store(REVIEW_KEY, review.subs); reviewShowSub(0); } else reviewShowSub(i);
   }
+  const PW_OK_KEY = "cal-test:reviewer-ok";
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function reviewerUnlocked() {
+    const h = SCENARIO.reviewerPasswordHash; if (!h) return true;
+    try { return sessionStorage.getItem(PW_OK_KEY) === h; } catch { return false; }
+  }
+  function askReviewerPassword(then) {
+    const m = $("#pwModal"), inp = $("#pwInput"), err = $("#pwErr");
+    inp.value = ""; err.hidden = true; m.hidden = false; inp.focus();
+    const done = () => { m.hidden = true; $("#pwUnlock").onclick = null; $("#pwCancel").onclick = null; inp.onkeydown = null; };
+    const attempt = async () => {
+      if (!crypto.subtle) { err.textContent = "Password check needs a secure (https) connection."; err.hidden = false; return; }
+      const h = await sha256Hex(inp.value);
+      if (h === SCENARIO.reviewerPasswordHash) { try { sessionStorage.setItem(PW_OK_KEY, h); } catch {} done(); then(); }
+      else { err.textContent = "That password is not correct."; err.hidden = false; inp.select(); }
+    };
+    $("#pwUnlock").onclick = attempt;
+    $("#pwCancel").onclick = () => { done(); if (location.hash.startsWith("#review")) history.replaceState(null, "", location.href.split("#")[0]); };
+    inp.onkeydown = (ev) => { if (ev.key === "Enter") attempt(); if (ev.key === "Escape") $("#pwCancel").onclick(); };
+  }
   function enterReview(code) {
-    if (review.on) return; review.on = true; state.readOnly = true;
+    if (review.on) return;
+    if (!reviewerUnlocked()) { askReviewerPassword(() => enterReview(code)); return; }
+    review.on = true; state.readOnly = true;
     closePopup(false); $("#submitModal").hidden = true;
     document.body.classList.add("readonly");
     $("#reviewSide").hidden = false; $("#candidateChip").hidden = true; $("#submitBtn").hidden = true; $("#instrBtn").hidden = true; $("#timer").hidden = true; $("#timerToggle").hidden = true;
