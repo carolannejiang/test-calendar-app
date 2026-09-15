@@ -85,7 +85,6 @@ test("listing downloads one page with bounded concurrency and paginates without 
   assert.equal(first.body.submissions.length, 50); assert.equal(api.reads.length, 50);
   assert.equal(first.body.submissions[0].id, "ABCDEF-1104");
   assert(api.maxActive() > 1 && api.maxActive() <= 8);
-  // Deleting the cursor record does not cause the next page to skip or repeat entries.
   api.records.delete("submissions/" + first.body.submissions.at(-1).id + ".json");
   const second = await api.request("submissions", { query: { cursor: first.body.cursor } });
   const third = await api.request("submissions", { query: { cursor: second.body.cursor } });
@@ -105,4 +104,49 @@ test("invalid stored records are skipped and both legacy and UUID IDs remain del
   for (const p of listed.body.submissions) assert.equal((await api.request("submissions", { method: "DELETE", query: { id: p.id } })).statusCode, 200);
   assert.equal((await api.request("submissions", { method: "DELETE", query: { id: "../elsewhere" } })).statusCode, 400);
   assert.equal(api.records.size, 1);
+});
+
+test("reviewers create tests with activation passwords and candidates open them by password alone", async () => {
+  const api = backend();
+  assert.equal((await api.request("tests", { method: "POST", body: { title: "Ops Round 2!", password: "fall-2026" }, password: "wrong" })).statusCode, 401);
+  assert.equal((await api.request("tests", { method: "POST", body: { title: "???", password: "fall-2026" } })).statusCode, 400);
+  assert.equal((await api.request("tests", { method: "POST", body: { title: "Ops Round 2!" } })).statusCode, 400);
+  const created = await api.request("tests", { method: "POST", body: { title: "Ops Round 2!", password: " fall-2026 " } });
+  assert.equal(created.statusCode, 201);
+  assert.equal(JSON.stringify(created.body.test), JSON.stringify({ slug: "ops-round-2", title: "Ops Round 2!", password: "fall-2026", revision: 1, events: [] }));
+  assert.equal(api.writes.at(-1).options.allowOverwrite, false);
+  assert.equal((await api.request("tests", { method: "POST", body: { title: "ops round 2", password: "other" } })).statusCode, 409);
+  const clash = await api.request("tests", { method: "POST", body: { title: "Second test", password: "fall-2026" } });
+  assert.equal(clash.statusCode, 409); assert.match(clash.body.error, /already uses this activation password/);
+  assert.equal(api.records.size, 1);
+
+  // PUT merges: the password alone keeps the calendar and revision; new events bump the revision.
+  const events = [{ id: "a", title: "Kickoff", date: "2026-09-15", start: 600, end: 660, color: "blue", detail: "" }];
+  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { events: [null] } })).statusCode, 400);
+  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "nope" }, body: { events } })).statusCode, 404);
+  const updated = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { events, slug: "other", revision: 99 } });
+  assert.equal(updated.statusCode, 200); assert.equal(JSON.stringify(updated.body.test.events), JSON.stringify(events));
+  assert.equal(updated.body.test.slug, "ops-round-2"); assert.equal(updated.body.test.revision, 2); assert.equal(updated.body.test.password, "fall-2026");
+  const renamed = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { password: "winter-2026" } });
+  assert.equal(renamed.body.test.revision, 2); assert.equal(renamed.body.test.password, "winter-2026");
+  assert.equal(JSON.stringify(renamed.body.test.events), JSON.stringify(events));
+  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { password: "" } })).statusCode, 400);
+  assert.equal(api.records.size, 1); assert.equal(api.writes.at(-1).options.allowOverwrite, true);
+
+  // Reading a test by slug needs the reviewer password; the activation password only works through /api/open.
+  assert.equal((await api.request("tests", { query: { slug: "ops-round-2" }, password: null })).statusCode, 401);
+  assert.equal((await api.request("tests", { query: { slug: "ops-round-2" } })).body.test.password, "winter-2026");
+  assert.equal((await api.request("tests", { query: { slug: "missing" } })).statusCode, 404);
+  for (const body of [{ password: "fall-2026" }, { password: "" }, { password: ["winter-2026"] }, "winter-2026", undefined]) {
+    const rejected = await api.request("open", { method: "POST", body, password: null });
+    assert.equal(rejected.statusCode, 404); assert.equal(rejected.body.error, "That password is not correct.");
+  }
+  const opened = await api.request("open", { method: "POST", body: { password: " winter-2026 " }, password: null });
+  assert.equal(opened.statusCode, 200);
+  assert.equal(JSON.stringify(opened.body.test), JSON.stringify({ slug: "ops-round-2", title: "Ops Round 2!", revision: 2, events }));
+  assert.equal((await api.request("open", { password: null })).statusCode, 405);
+  api.records.set("tests/broken.json", { uploadedAt: new Date(), json: "{" });
+  const listed = await api.request("tests");
+  assert.equal(JSON.stringify(listed.body.tests), JSON.stringify([{ slug: "ops-round-2", title: "Ops Round 2!", password: "winter-2026" }]));
+  assert.equal((await api.request("tests", { method: "DELETE" })).statusCode, 405);
 });

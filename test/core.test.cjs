@@ -5,6 +5,7 @@ const submission = require("../shared/submission");
 const { layoutColumns, describeChanges } = require("../shared/calendar");
 const { mergeSubmissions, submissionKey, sortSubmissions } = require("../shared/review");
 const { createStorage } = require("../shared/storage");
+const { parseTest, slugify } = require("../shared/test");
 const { payload, serverPayload, event } = require("./helpers.cjs");
 
 test("submission schema rejects malformed events, notes, IDs, dates and timing", () => {
@@ -31,7 +32,6 @@ test("Unicode and existing v1 tuple fields round-trip through both backup codecs
     const code = submission.encodePayload(p, library);
     assert.deepEqual(submission.decodePayload("https://example.test/#review=" + code, library), submission.parseSubmission(p));
   }
-  // A v1 B1 code created without the new encoder remains readable.
   assert.deepEqual(submission.decodePayload("B1." + Buffer.from(JSON.stringify(p)).toString("base64url")), submission.parseSubmission(p));
 });
 
@@ -61,7 +61,6 @@ test("refresh replaces server cache, keeps imports and sorts by server receipt",
   assert.equal(submissionKey(sortSubmissions([old, newer])[0]), newer.id);
   const merged = mergeSubmissions([payload()], [old]);
   assert.equal(merged.length, 1); assert.equal(merged[0].id, old.id);
-  // Two server records remain distinct even if the candidate supplied the same timestamp.
   assert.equal(mergeSubmissions([old], [{ ...old, id: newer.id }]).length, 2);
 });
 
@@ -72,4 +71,22 @@ test("blocked storage supports reads, writes and reset without throwing", () => 
   storage.set("key", "value"); assert.equal(storage.get("key"), "value");
   storage.remove("key"); assert.equal(storage.get("key"), null);
   assert.equal(failures, 3);
+});
+
+test("test titles become URL slugs and test records are validated", () => {
+  assert.equal(slugify("  Ops Round 2 (Fall) — Café! "), "ops-round-2-fall-cafe");
+  assert.equal(slugify("!!!"), "");
+  assert.equal(slugify("x".repeat(100)).length, 60);
+  const valid = { slug: "ops-round-2", title: " Ops round 2 ", events: [{ id: "a", title: "Kickoff", date: "2026-09-15", start: 600, end: 660 }] };
+  assert.deepEqual(parseTest(valid), { slug: "ops-round-2", title: "Ops round 2", password: "", revision: 1, events: [{ id: "a", title: "Kickoff", date: "2026-09-15", start: 600, end: 660, color: "blue", detail: "" }] });
+  assert.equal(parseTest({ ...valid, revision: 7, password: " open-sesame " }).password, "open-sesame");
+  assert.deepEqual(parseTest(JSON.stringify(valid)), parseTest(valid));
+  for (const override of [
+    { slug: "Ops" }, { slug: "-ops" }, { revision: 0 }, { revision: "2" }, { password: 42 }, { password: "x".repeat(81) }, { slug: "ops--2" }, { slug: "../x" }, { title: "" }, { title: "   " }, { title: "x".repeat(81) },
+    { events: null }, { events: [null] }, { events: [{ id: "a", date: "2026-02-30", start: 600, end: 660 }] },
+    { events: [{ id: "a", date: "2026-09-15", start: 660, end: 600 }] }, { events: [{ id: "a", date: "2026-09-15", start: 600, end: 660, color: "pink" }] },
+    { events: [valid.events[0], valid.events[0]] },
+  ]) assert.throws(() => parseTest({ ...valid, ...override }), submission.ValidationError, JSON.stringify(override));
+  assert.throws(() => parseTest("{"), { status: 400 });
+  assert.throws(() => parseTest({ ...valid, padding: "x".repeat(250_000) }), { status: 413 });
 });

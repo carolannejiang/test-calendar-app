@@ -223,7 +223,7 @@ test("reviewer dialog cancels pending checks and reopens without stale handlers"
   finishDigest(Buffer.from(scenario.reviewerPasswordHash, "hex")); await flush();
   assert.equal(ui.document.querySelector("#reviewSide").hidden, false);
   assert.equal(ui.window.sessionStorage.getItem("cal-test:reviewer-pw"), "checked-password");
-  assert.equal(ui.calls.length, 1);
+  assert.equal(ui.calls.filter(call => call.url === "/api/submissions").length, 1);
   unlock.click();
   assert.equal(checks, 2);
   assert.equal(ui.errors.length, 0);
@@ -289,4 +289,167 @@ test("submission codes are pasted in a modal opened from the footer link", async
   ui.document.querySelector("#reviewCodeCancel").click();
   assert.equal(modal.hidden, true);
   assert.equal(ui.errors.length, 0);
+});
+
+const sampleTest = (overrides = {}) => ({ slug: "ops-round-2", title: "Ops round 2", password: "fall-2026", revision: 3, events: [{ id: "t1", title: "Kickoff", date: "2026-09-15", start: 600, end: 660, color: "green", detail: "Recurring" }], ...overrides });
+const testFetch = (handlers) => async (url, options = {}) => {
+  const method = options.method || "GET";
+  for (const [pattern, handler] of handlers) if (pattern.test(method + " " + url)) return handler(url, options);
+  return response({ ok: true, submissions: [], cursor: null });
+};
+
+test("the start gate activates a reviewer-created test by its password and keeps it for this browser", async t => {
+  const opens = [];
+  const ui = app({ unlocked: false, fetch: testFetch([[/POST \/api\/open$/, (url, options) => {
+    opens.push(JSON.parse(options.body).password);
+    const { password, ...safe } = sampleTest();
+    return opens.at(-1) === password ? response({ ok: true, test: safe }) : response({ ok: false, error: "That password is not correct." }, 404);
+  }]]) });
+  t.after(ui.close);
+  assert.equal(ui.document.querySelector("#gateModal").hidden, false);
+  const input = ui.document.querySelector("#gateInput"), start = ui.document.querySelector("#gateStart");
+  input.value = "wrong-password"; start.click(); await flush();
+  assert.equal(ui.document.querySelector("#gateErr").hidden, false);
+  assert.equal(ui.document.querySelector("#gateErr").textContent, "That password is not correct.");
+  assert.equal(ui.window.localStorage.getItem("cal-test:test"), null);
+  input.value = "fall-2026"; start.click(); await flush();
+  assert.deepEqual(opens, ["wrong-password", "fall-2026"]);
+  const stored = JSON.parse(ui.window.localStorage.getItem("cal-test:test"));
+  assert.equal(stored.slug, "ops-round-2"); assert.equal(stored.revision, 3); assert.equal(stored.password, "");
+  assert.equal(ui.navigations.length, 1);
+  assert.equal(ui.window.localStorage.getItem("cal-test:opened:" + scenario.name), null);
+
+  const again = app({ unlocked: false, storage: { "cal-test:test": JSON.stringify(stored) } }); t.after(again.close);
+  assert.equal(again.document.querySelector("#gateModal").hidden, true);
+  assert.equal(again.document.querySelectorAll(".ev").length, 1);
+  assert.equal(again.document.querySelector(".ev .t").textContent, "Kickoff");
+  assert.match(again.document.querySelector(".ev").title, /Recurring/);
+  assert.equal(again.window.localStorage.getItem(KEY), null);
+  const draft = JSON.parse(again.window.localStorage.getItem("cal-test:Ops round 2 (rev 3)"));
+  assert.equal(draft.events.length, 1); assert(draft.openedAt);
+  again.document.querySelector("#submitBtn").click(); await flush();
+  assert.equal(JSON.parse(again.calls.at(-1).options.body).s, "Ops round 2 (rev 3)");
+  assert.equal(again.errors.length, 0);
+});
+
+test("the default scenario password still opens the scenario.js calendar without touching the server", async t => {
+  const ui = app({ unlocked: false, digest: async () => Buffer.from(scenario.openPasswordHash, "hex") }); t.after(ui.close);
+  ui.document.querySelector("#gateInput").value = "default-password";
+  ui.document.querySelector("#gateStart").click(); await flush();
+  assert.equal(ui.document.querySelector("#gateModal").hidden, true);
+  assert.equal(ui.calls.length, 0);
+  assert.equal(ui.window.localStorage.getItem("cal-test:test"), null);
+  assert.equal(ui.document.querySelectorAll(".ev").length, 18);
+});
+
+test("a reviewer link opens a test with the reviewer password and reports one that cannot be opened", async t => {
+  const ui = app({ search: "?test=ops-round-2", review: true, fetch: testFetch([
+    [/GET \/api\/tests\?slug=ops-round-2$/, () => response({ ok: true, test: sampleTest() })],
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [{ slug: "ops-round-2", title: "Ops round 2", password: "fall-2026" }] })],
+  ]) });
+  t.after(ui.close); await flush();
+  assert.equal(ui.calls[0].url, "/api/tests?slug=ops-round-2");
+  assert.equal(ui.calls[0].options.headers["X-Reviewer-Password"], "test-reviewer-password");
+  assert.equal(ui.document.querySelectorAll(".ev").length, 1);
+  assert.match(ui.document.querySelector("#testCurrent").textContent, /Ops round 2 .* "fall-2026"/);
+  assert.equal(ui.document.querySelector("#testTools").hidden, false);
+  assert.deepEqual([...ui.document.querySelectorAll("#testList a")].map(a => [a.textContent, a.getAttribute("href")]),
+    [[`Default (${scenario.name}) \u00b7 scenario.js password`, "/#review"], ["Ops round 2 \u00b7 fall-2026", "/?test=ops-round-2#review"]]);
+  assert.equal(ui.document.querySelector("#testList a.active").getAttribute("href"), "/?test=ops-round-2#review");
+  assert.equal(ui.window.localStorage.getItem("cal-test:test"), null);
+
+  const missing = app({ search: "?test=missing", review: true, fetch: testFetch([
+    [/GET \/api\/tests\?slug=/, () => response({ ok: false, error: "Test not found" }, 404)],
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [] })],
+  ]) });
+  t.after(missing.close); await flush();
+  assert.equal(missing.document.querySelector("#reviewSide").hidden, false);
+  assert.match(missing.document.querySelector("#testErr").textContent, /Could not open that test: Test not found/);
+  assert.equal(missing.document.querySelectorAll(".ev").length, 18);
+  assert.equal(missing.errors.length, 0);
+
+  // Without a reviewer session the link falls back to the default calendar until the password is entered.
+  const locked = app({ search: "?test=ops-round-2", review: true, reviewerUnlocked: false, fetch: testFetch([]) }); t.after(locked.close);
+  assert.equal(locked.calls.length, 0);
+  assert.equal(locked.document.querySelector("#pwModal").hidden, false);
+});
+
+test("reviewers create a test by title and password, land in an empty calendar, edit it, and save", async t => {
+  const created = [];
+  const ui = app({ review: true, fetch: testFetch([
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [] })],
+    [/POST \/api\/tests$/, (url, options) => { created.push(JSON.parse(options.body)); return response({ ok: true, test: { slug: "new-test", title: "New test", password: "go", revision: 1, events: [] } }, 201); }],
+  ]) });
+  t.after(ui.close); await flush();
+  assert.equal(ui.document.querySelector("#testTools").hidden, true);
+  const submitCreate = () => ui.document.querySelector("#testCreate").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
+  ui.document.querySelector("#testTitle").value = "!!!"; ui.document.querySelector("#testPasswordNew").value = "go";
+  submitCreate();
+  assert.match(ui.document.querySelector("#testErr").textContent, /letters or numbers/);
+  ui.document.querySelector("#testTitle").value = "New test"; ui.document.querySelector("#testPasswordNew").value = " ";
+  submitCreate();
+  assert.match(ui.document.querySelector("#testErr").textContent, /activation password/);
+  assert.equal(created.length, 0);
+  ui.document.querySelector("#testPasswordNew").value = "go";
+  submitCreate(); await flush();
+  assert.deepEqual(created, [{ title: "New test", password: "go" }]);
+  assert.equal(ui.calls.at(-1).options.headers["X-Reviewer-Password"], "test-reviewer-password");
+  assert.equal(ui.navigations.length, 1);
+
+  const saved = [];
+  const editor = app({ search: "?test=new-test#edit", fetch: testFetch([
+    [/GET \/api\/tests\?slug=new-test$/, () => response({ ok: true, test: { slug: "new-test", title: "New test", password: "go", revision: 1, events: [] } })],
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [{ slug: "new-test", title: "New test", password: "go" }] })],
+    [/PUT \/api\/tests\?slug=new-test$/, (url, options) => { saved.push(JSON.parse(options.body)); return response({ ok: true, test: {} }); }],
+  ]) });
+  t.after(editor.close); await flush();
+  assert.equal(editor.document.querySelector("#reviewSide").hidden, false);
+  assert.equal(editor.document.querySelector("#testBuildTools").hidden, false);
+  assert.equal(editor.document.body.classList.contains("readonly"), false);
+  assert.equal(editor.window.location.hash, "#review");
+  assert.match(editor.document.querySelector("#reviewBanner").textContent, /Editing starting calendar/);
+  assert.equal(editor.document.querySelectorAll(".ev").length, 0);
+  assert.equal(editor.document.querySelector('#dayNotes textarea[data-date="2026-09-14"]').disabled, true);
+
+  const column = editor.document.querySelector('.daycol[data-date="2026-09-16"]');
+  column.getBoundingClientRect = () => ({ left: 0, right: 100, top: 0, bottom: 528, width: 100, height: 528 });
+  editor.document.querySelector(".daycol").getBoundingClientRect = column.getBoundingClientRect;
+  column.dispatchEvent(new editor.window.MouseEvent("pointerdown", { button: 0, clientX: 50, clientY: 96, bubbles: true }));
+  editor.window.dispatchEvent(new editor.window.MouseEvent("pointerup", { clientX: 50, clientY: 96, bubbles: true }));
+  assert.equal(editor.document.querySelector("#popup").hidden, false);
+  assert.equal(editor.document.querySelector("#popNotesLabel").textContent, "Details shown under the event (optional)");
+  editor.document.querySelector("#popTitle").value = "Standup";
+  editor.document.querySelector("#popNotes").value = "Daily";
+  editor.document.querySelector("#popSave").click();
+  assert.equal(editor.document.querySelectorAll('.daycol[data-date="2026-09-16"] .ev').length, 1);
+  assert.equal(JSON.parse(editor.window.localStorage.getItem("cal-test:New test (rev 1)")).events.length, 0);
+
+  editor.document.querySelector("#testSave").click(); await flush();
+  assert.deepEqual(saved.map(body => Object.keys(body)), [["title", "events"]]);
+  assert.deepEqual(Object.keys(saved[0].events[0]).sort(), ["color", "date", "detail", "end", "id", "start", "title"]);
+  assert.equal(saved[0].events[0].title, "Standup"); assert.equal(saved[0].events[0].detail, "Daily"); assert.equal(saved[0].events[0].date, "2026-09-16");
+  // The new revision is part of the scenario name, so the page reloads to pick it up.
+  assert.equal(editor.navigations.length, 1);
+  assert.equal(editor.window.sessionStorage.getItem("cal-test:toast"), "Starting calendar saved");
+  assert.equal(editor.errors.length, 0);
+
+  const reloaded = app({ search: "?test=new-test", review: true, fetch: testFetch([
+    [/GET \/api\/tests\?slug=new-test$/, () => response({ ok: true, test: { slug: "new-test", password: "go", revision: 2, ...saved[0] } })],
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [{ slug: "new-test", title: "New test", password: "go" }] })],
+    [/PUT \/api\/tests\?slug=new-test$/, (url, options) => { saved.push(JSON.parse(options.body)); return response({ ok: true, test: {} }); }],
+  ]) });
+  t.after(reloaded.close);
+  reloaded.window.sessionStorage.setItem("cal-test:toast", "Starting calendar saved"); await flush();
+  assert.equal(reloaded.document.querySelector("#toast").textContent, "Starting calendar saved");
+  assert.equal(reloaded.window.sessionStorage.getItem("cal-test:toast"), null);
+  assert.equal(reloaded.document.querySelectorAll(".ev").length, 1);
+  assert.equal(reloaded.document.querySelector("#testBuildTools").hidden, true);
+  assert.equal(reloaded.document.querySelector("#testTools").hidden, false);
+  assert.equal(reloaded.document.querySelector("#testList a.active").textContent, "New test \u00b7 go");
+  reloaded.document.querySelector("#testPasswordInput").value = "go-2";
+  reloaded.document.querySelector("#testPassword").dispatchEvent(new reloaded.window.Event("submit", { cancelable: true })); await flush();
+  assert.deepEqual(saved.at(-1), { password: "go-2" });
+  assert.equal(reloaded.window.sessionStorage.getItem("cal-test:toast"), "Activation password saved");
+  assert.equal(reloaded.navigations.length, 1);
+  assert.equal(reloaded.errors.length, 0);
 });
