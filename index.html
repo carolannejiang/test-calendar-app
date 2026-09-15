@@ -23,6 +23,9 @@
                    reviewer view (#review). To change it, run in a terminal:
                      printf '%s' 'your-new-password' | shasum -a 256
                    and paste the hash here. Set to "" for no password.
+   - openPasswordHash: SHA-256 of the password a candidate must enter
+                   before the test opens (so nobody starts it by accident).
+                   Same recipe as above. Set to "" for no gate.
    - events:       the starting calendar. Give every event a stable
                    id so the reviewer view can tell moved/deleted
                    events from new ones. Times are 24h "HH:MM".
@@ -41,6 +44,7 @@ const SCENARIO = {
   dayEnd: "19:00",
   apiBase: "https://test-calendar-app.vercel.app",
   reviewerPasswordHash: "0a90d385aef07a5fd74c59c60ec803f554009f6ec0b88607d614b3f0e39dff2d",
+  openPasswordHash: "914916a6aa168a890b6752c7510d6837a51311a15999a5e15fa63d8a5934b6ac",
   instructions:
     "Review the calendar and complete the scheduling task you were given. " +
     "When you are done, click Submit and send us the code it gives you.",
@@ -488,6 +492,15 @@ button { font: inherit; color: inherit; }
   </div>
 </div>
 
+<div class="scrim" id="gateModal" hidden>
+  <div class="modal" role="dialog" aria-label="Start the test">
+    <h2>Ready to start?</h2>
+    <p>Enter the password to open the test. The clock starts as soon as you continue, so only do this when you are ready.</p>
+    <input type="password" id="gateInput" class="pw-input" autocomplete="off" aria-label="Password">
+    <div class="err" id="gateErr" hidden>That password is not correct.</div>
+    <div class="actions"><button class="btn primary" id="gateStart">Start</button></div>
+  </div>
+</div>
 <div class="scrim" id="pwModal" hidden>
   <div class="modal" role="dialog" aria-label="Reviewer password">
     <h2>Reviewer access</h2>
@@ -555,7 +568,10 @@ button { font: inherit; color: inherit; }
   }
 
   // ---------- state ----------
-  if (location.hash === "#reset") { localStorage.removeItem(KEY); location.hash = ""; }
+  const GATE_KEY = "cal-test:opened:" + SCENARIO.name;
+  if (location.hash === "#reset") { localStorage.removeItem(KEY); localStorage.removeItem(GATE_KEY); location.hash = ""; }
+  const isReviewUrl = /^#review/.test(location.hash) || new URLSearchParams(location.search).has("review");
+  let gated = !!SCENARIO.openPasswordHash && !isReviewUrl && localStorage.getItem(GATE_KEY) !== "1";
 
   const saved = load(KEY);
   const state = {
@@ -565,7 +581,7 @@ button { font: inherit; color: inherit; }
     readOnly: false,
     selected: null,
     dayNotes: (saved && saved.dayNotes) || {},
-    openedAt: (saved && saved.openedAt) || new Date().toISOString(),
+    openedAt: (saved && saved.openedAt) || (gated ? null : new Date().toISOString()),
     activeSec: (saved && saved.activeSec) || 0,
   };
   function persist() { if (!state.readOnly) store(KEY, { candidate: state.candidate, events: state.events, dayNotes: state.dayNotes, openedAt: state.openedAt, activeSec: state.activeSec }); }
@@ -581,7 +597,7 @@ button { font: inherit; color: inherit; }
   applyTimerVisibility();
   $("#timerToggle").addEventListener("click", () => { timerHidden = !timerHidden; try { localStorage.setItem(TIMER_KEY, timerHidden ? "1" : "0"); } catch {} applyTimerVisibility(); });
   setInterval(() => {
-    if (state.readOnly || document.visibilityState !== "visible") return;
+    if (state.readOnly || gated || document.visibilityState !== "visible") return;
     state.activeSec++; drawTimer(); if (state.activeSec % 5 === 0) persist();
   }, 1000);
   document.addEventListener("visibilitychange", () => persist());
@@ -788,7 +804,7 @@ button { font: inherit; color: inherit; }
   const simNow = () => new Date(SIM_START.getTime() + (Date.now() - Date.parse(state.openedAt)));
   function drawNow() {
     for (const n of grid.querySelectorAll(".nowline, .nowbadge")) n.remove();
-    if (state.readOnly) return;
+    if (state.readOnly || !state.openedAt) return;
     const now = simNow(), min = now.getHours() * 60 + now.getMinutes();
     const col = grid.querySelector(`.daycol[data-date="${fmtDate(now)}"]`);
     if (!col || min < DAY_START || min >= DAY_END) return;
@@ -1144,6 +1160,19 @@ button { font: inherit; color: inherit; }
     $("#pwCancel").onclick = () => { done(); if (location.hash.startsWith("#review")) history.replaceState(null, "", location.href.split("#")[0]); };
     inp.onkeydown = (ev) => { if (ev.key === "Enter") attempt(); if (ev.key === "Escape") $("#pwCancel").onclick(); };
   }
+  function showGate() {
+    const m = $("#gateModal"), inp = $("#gateInput"), err = $("#gateErr");
+    inp.value = ""; err.hidden = true; m.hidden = false; inp.focus();
+    const attempt = async () => {
+      if (!crypto.subtle) { err.textContent = "Password check needs a secure (https) connection."; err.hidden = false; return; }
+      if (await sha256Hex(inp.value) !== SCENARIO.openPasswordHash) { err.textContent = "That password is not correct."; err.hidden = false; inp.select(); return; }
+      gated = false; try { localStorage.setItem(GATE_KEY, "1"); } catch {}
+      if (!state.openedAt) state.openedAt = new Date().toISOString();
+      persist(); m.hidden = true; render();
+    };
+    $("#gateStart").onclick = attempt;
+    inp.onkeydown = (ev) => { if (ev.key === "Enter") attempt(); };
+  }
   function enterReview(code) {
     if (review.on) return;
     if (!reviewerUnlocked()) { askReviewerPassword(() => enterReview(code)); return; }
@@ -1176,6 +1205,7 @@ button { font: inherit; color: inherit; }
 
   $("#candidateId").textContent = state.candidate;
   buildDayNotes(); render();
+  if (gated) showGate();
   const hashCode = location.hash.match(/^#review=(.+)$/);
   if (hashCode) { enterReview(hashCode[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }
   else if (location.hash === "#review" || new URLSearchParams(location.search).has("review")) enterReview();
