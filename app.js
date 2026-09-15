@@ -52,15 +52,20 @@
 
   // ---------- state ----------
   const GATE_KEY = "cal-test:opened:" + SCENARIO.name;
-  if (location.hash === "#reset") { local.remove(KEY); local.remove(GATE_KEY); location.hash = ""; }
+  const SUBMITTED_KEY = "cal-test:submitted:" + SCENARIO.name;
+  if (location.hash === "#reset") { local.remove(KEY); local.remove(GATE_KEY); local.remove(SUBMITTED_KEY); location.hash = ""; }
   const isReviewUrl = /^#review/.test(location.hash) || new URLSearchParams(location.search).has("review");
-  let gated = !!SCENARIO.openPasswordHash && local.get(GATE_KEY) !== "1";
+  // Once submitted, the response is locked for this candidate ID until the scenario changes or #reset is used.
+  let submitted = load(SUBMITTED_KEY);
+  if (!submitted || typeof submitted.candidate !== "string" || typeof submitted.code !== "string") submitted = null;
+  const isGated = () => !submitted && !!SCENARIO.openPasswordHash && local.get(GATE_KEY) !== "1";
+  let gated = isGated();
 
   const scenarioDate = toDate(SCENARIO.today);
   const SCENARIO_WEEK = addDays(scenarioDate, -scenarioDate.getDay());
   const saved = loadDraft();
   const state = {
-    candidate: (saved && saved.candidate) || makeCandidateId(),
+    candidate: (submitted && submitted.candidate) || (saved && saved.candidate) || makeCandidateId(),
     events: saved && Array.isArray(saved.events) ? saved.events.map(normalize) : clone(SEED),
     weekStart: new Date(SCENARIO_WEEK),
     compareSeed: true,
@@ -432,7 +437,7 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
     if (!popup.hidden) closePopup(false);
-    $("#submitModal").hidden = true; $("#instrModal").hidden = true;
+    $("#instrModal").hidden = true;
     if (!$("#notesModal").hidden) closeNotesModal();
   });
   document.addEventListener("pointerdown", (ev) => {
@@ -466,31 +471,52 @@
     if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
   }
-  let lastCode = "";
-  $("#submitBtn").addEventListener("click", async () => {
-    if (!confirm("Submit your response now? Make sure you are finished before continuing.")) return;
+  // Locks the calendar and shows the submission screen. The screen cannot be dismissed.
+  function showSubmitted(saving = false) {
     closePopup(false);
+    state.readOnly = true; document.body.classList.add("readonly");
+    $("#gateModal").hidden = true;
+    $("#submitBtn").hidden = true; $("#instrBtn").hidden = true; $("#timerToggle").hidden = true; applyTimerVisibility();
+    const title = $("#submitTitle"), st = $("#submitStatus");
+    const showCode = (on) => { $("#submitBackup").hidden = !on; $("#submitCode").hidden = !on; $("#copyCodeBtn").hidden = !on; };
+    $("#submitId").textContent = state.candidate; $("#submitCode").value = submitted.code;
+    $("#retryBtn").hidden = true; st.className = "submit-status";
+    if (saving) { title.textContent = "Submitting your response\u2026"; st.textContent = ""; showCode(false); }
+    else if (submitted.saved) { title.textContent = "Your response has been submitted."; st.textContent = ""; showCode(false); }
+    else if (!hasBackend()) { title.textContent = "Your response has been submitted."; st.textContent = "Copy the code below and send it to us. It contains your calendar and your anonymous candidate ID, nothing else."; showCode(true); }
+    else {
+      title.textContent = "We couldn\u2019t save your response automatically.";
+      st.className = "submit-status bad"; st.textContent = "Your response is locked. Try again, or copy the code below and send it to us.";
+      showCode(true); $("#retryBtn").hidden = false;
+    }
+    $("#submitModal").hidden = false;
+    render();
+  }
+  async function sendSubmission(payload) {
+    if (!hasBackend()) { showSubmitted(); return; }
+    showSubmitted(true);
+    try { await postSubmission(payload); submitted.saved = true; store(SUBMITTED_KEY, submitted); }
+    catch { /* the locked screen offers the backup code and a retry */ }
+    showSubmitted();
+  }
+  $("#submitBtn").addEventListener("click", () => {
+    if (submitted || !confirm("Submit your response now? Make sure you are finished before continuing.")) return;
+    closePopup(false); persist();
     let payload;
     try {
       payload = parseSubmission(serialize());
-      lastCode = encodePayload(payload, window.LZString);
+      submitted = { candidate: state.candidate, code: encodePayload(payload, window.LZString), saved: false };
     } catch (error) { alert("Could not submit: " + error.message); return; }
-    const st = $("#submitStatus");
-    const showCode = (on) => { $("#submitBackup").hidden = !on; $("#submitCode").hidden = !on; $("#copyCodeBtn").hidden = !on; };
-    $("#submitId").textContent = state.candidate; $("#submitCode").value = lastCode; $("#submitModal").hidden = false;
-    st.className = "submit-status"; st.textContent = "Saving\u2026"; showCode(false);
-    if (!hasBackend()) { st.className = "submit-status"; st.textContent = "Copy the code below and send it to us. It contains your calendar and your anonymous candidate ID, nothing else."; showCode(true); return; }
-    $("#submitBtn").disabled = true;
-    try {
-      await postSubmission(payload);
-      st.className = "submit-status ok"; st.textContent = "\u2713 Submitted. Your response has been sent to the team. Please paste your candidate code to the work trial doc, and you can now close this window.";
-    } catch (e) {
-      st.className = "submit-status bad"; st.textContent = "We couldn\u2019t save this automatically. Please copy the code below and send it to us."; showCode(true);
-    } finally { $("#submitBtn").disabled = false; }
+    store(SUBMITTED_KEY, submitted);
+    sendSubmission(payload);
   });
-  $("#submitCloseBtn").addEventListener("click", () => { $("#submitModal").hidden = true; });
-  $("#submitModal").addEventListener("click", (ev) => { if (ev.target === ev.currentTarget) ev.currentTarget.hidden = true; });
-  $("#copyCodeBtn").addEventListener("click", () => copy(lastCode, "Code"));
+  $("#retryBtn").addEventListener("click", () => {
+    let payload;
+    try { payload = decodePayload(submitted.code, window.LZString); }
+    catch (error) { alert("Could not read the saved response: " + error.message); return; }
+    sendSubmission(payload);
+  });
+  $("#copyCodeBtn").addEventListener("click", () => copy(submitted.code, "Code"));
 
   // ---------- reviewer view ----------
   function renderChanges(evs, label) {
@@ -725,9 +751,9 @@
     state.events = sv && Array.isArray(sv.events) ? sv.events.map(normalize) : clone(SEED);
     state.dayNotes = (sv && sv.dayNotes) || {};
     setWeek(SCENARIO.today);
-    gated = !!SCENARIO.openPasswordHash && local.get(GATE_KEY) !== "1";
-    if (gated) showGate();
+    gated = isGated();
     render();
+    if (submitted) showSubmitted(); else if (gated) showGate();
   }
   $("#reviewLoad").addEventListener("click", () => {
     const err = $("#reviewErr"); err.hidden = true;
@@ -755,7 +781,7 @@
 
   $("#candidateId").textContent = state.candidate;
   buildDayNotes(); render();
-  if (gated && !isReviewUrl) showGate();
+  if (submitted) showSubmitted(); else if (gated && !isReviewUrl) showGate();
   routeFromHash();
   window.addEventListener("hashchange", routeFromHash);
 
