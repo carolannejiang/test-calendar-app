@@ -1145,7 +1145,7 @@ button { font: inherit; color: inherit; }
   buildDayNotes(); render();
   const hashCode = location.hash.match(/^#review=(.+)$/);
   if (hashCode) { enterReview(hashCode[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }
-  else if (location.hash === "#review") enterReview();
+  else if (location.hash === "#review" || new URLSearchParams(location.search).has("review")) enterReview();
   window.addEventListener("hashchange", () => {
     const m2 = location.hash.match(/^#review=(.+)$/);
     if (m2) { enterReview(m2[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }

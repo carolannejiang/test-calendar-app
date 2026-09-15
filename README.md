@@ -4,7 +4,7 @@ A Google Calendar–style week view used to administer scheduling work tests dur
 
 Candidates open the page, follow the instructions, edit the calendar (create, move, resize, delete events), write their reasoning, and click **Submit**. The submission is saved to the backend automatically, and the page also shows a backup code the candidate can send if saving fails. Reviewers open the **reviewer view**, enter the reviewer password, and see every submission: the calendar, a list of changes from the starting scenario, per-day notes, and time spent.
 
-Live: https://test-calendar-app.vercel.app · Reviewer view: https://test-calendar-app.vercel.app/#review
+Live: https://test-calendar-app.vercel.app · Reviewer view: https://test-calendar-app.vercel.app/?review (or /#review)
 
 ## Layout
 
