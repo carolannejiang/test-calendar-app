@@ -418,6 +418,7 @@ test("reviewers create a test by title and password, land in an empty calendar, 
   editor.window.dispatchEvent(new editor.window.MouseEvent("pointerup", { clientX: 50, clientY: 96, bubbles: true }));
   assert.equal(editor.document.querySelector("#popup").hidden, false);
   assert.equal(editor.document.querySelector("#popNotesLabel").textContent, "Details shown under the event (optional)");
+  assert.equal(editor.document.querySelector("#popNotes").maxLength, 500);
   editor.document.querySelector("#popTitle").value = "Standup";
   editor.document.querySelector("#popNotes").value = "Daily";
   editor.document.querySelector("#popSave").click();
@@ -425,7 +426,8 @@ test("reviewers create a test by title and password, land in an empty calendar, 
   assert.equal(JSON.parse(editor.window.localStorage.getItem("cal-test:New test (rev 1)")).events.length, 0);
 
   editor.document.querySelector("#testSave").click(); await flush();
-  assert.deepEqual(saved.map(body => Object.keys(body)), [["title", "events"]]);
+  // The save names the revision it edited, so a concurrent save of the same test is refused instead of sharing a revision number.
+  assert.deepEqual(saved.map(body => Object.keys(body)), [["revision", "events"]]); assert.equal(saved[0].revision, 1);
   assert.deepEqual(Object.keys(saved[0].events[0]).sort(), ["color", "date", "detail", "end", "id", "start", "title"]);
   assert.equal(saved[0].events[0].title, "Standup"); assert.equal(saved[0].events[0].detail, "Daily"); assert.equal(saved[0].events[0].date, "2026-09-16");
   // The new revision is part of the scenario name, so the page reloads to pick it up.
@@ -434,7 +436,7 @@ test("reviewers create a test by title and password, land in an empty calendar, 
   assert.equal(editor.errors.length, 0);
 
   const reloaded = app({ search: "?test=new-test", review: true, fetch: testFetch([
-    [/GET \/api\/tests\?slug=new-test$/, () => response({ ok: true, test: { slug: "new-test", password: "go", revision: 2, ...saved[0] } })],
+    [/GET \/api\/tests\?slug=new-test$/, () => response({ ok: true, test: { slug: "new-test", title: "New test", password: "go", revision: 2, events: saved[0].events } })],
     [/GET \/api\/tests$/, () => response({ ok: true, tests: [{ slug: "new-test", title: "New test", password: "go" }] })],
     [/PUT \/api\/tests\?slug=new-test$/, (url, options) => { saved.push(JSON.parse(options.body)); return response({ ok: true, test: {} }); }],
   ]) });
@@ -448,8 +450,85 @@ test("reviewers create a test by title and password, land in an empty calendar, 
   assert.equal(reloaded.document.querySelector("#testList a.active").textContent, "New test \u00b7 go");
   reloaded.document.querySelector("#testPasswordInput").value = "go-2";
   reloaded.document.querySelector("#testPassword").dispatchEvent(new reloaded.window.Event("submit", { cancelable: true })); await flush();
-  assert.deepEqual(saved.at(-1), { password: "go-2" });
+  assert.deepEqual(saved.at(-1), { revision: 2, password: "go-2" });
   assert.equal(reloaded.window.sessionStorage.getItem("cal-test:toast"), "Activation password saved");
   assert.equal(reloaded.navigations.length, 1);
+  assert.equal(reloaded.errors.length, 0);
+});
+
+test("reviewer hashes never skip the start gate: #edit asks for the reviewer password and other hashes show the gate", async t => {
+  const editing = app({ unlocked: false, reviewerUnlocked: false, search: "#edit" }); t.after(editing.close);
+  assert.equal(editing.document.querySelector("#pwModal").hidden, false);
+  assert.equal(editing.document.querySelector("#gateModal").hidden, true);
+  editing.document.querySelector("#pwCancel").click();
+  assert.equal(editing.document.querySelector("#pwModal").hidden, true);
+  assert.equal(editing.document.querySelector("#gateModal").hidden, false);
+  assert.equal(editing.document.querySelector("#reviewSide").hidden, true);
+  for (const search of ["#reviewx", "#editing", "#review-notes"]) {
+    const ui = app({ unlocked: false, reviewerUnlocked: false, search }); t.after(ui.close);
+    assert.equal(ui.document.querySelector("#gateModal").hidden, false, search);
+    assert.equal(ui.document.querySelector("#pwModal").hidden, true, search);
+    assert.equal(ui.errors.length, 0);
+  }
+});
+
+test("a test cannot be activated in a browser that blocks storage, because it would be lost on reload", async t => {
+  const { password, ...safe } = sampleTest();
+  const ui = app({ unlocked: false, blockedStorage: true, fetch: testFetch([[/POST \/api\/open$/, () => response({ ok: true, test: safe })]]) });
+  t.after(ui.close);
+  ui.document.querySelector("#gateInput").value = password;
+  ui.document.querySelector("#gateStart").click(); await flush();
+  assert.equal(ui.document.querySelector("#gateModal").hidden, false);
+  assert.match(ui.document.querySelector("#gateErr").textContent, /blocks site storage/);
+  assert.equal(ui.navigations.length, 0);
+  assert.equal(ui.document.querySelector("#storageNotice").hidden, false);
+  assert.equal(ui.errors.length, 0);
+});
+
+test("a test may not reuse the scenario.js password, which the gate checks first", async t => {
+  const created = [];
+  const ui = app({ review: true, digest: async () => Buffer.from(scenario.openPasswordHash, "hex"), fetch: testFetch([
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [] })],
+    [/POST \/api\/tests$/, (url, options) => { created.push(JSON.parse(options.body)); return response({ ok: true, test: sampleTest() }, 201); }],
+  ]) });
+  t.after(ui.close); await flush();
+  ui.document.querySelector("#testTitle").value = "Collision"; ui.document.querySelector("#testPasswordNew").value = "default-password";
+  ui.document.querySelector("#testCreate").dispatchEvent(new ui.window.Event("submit", { cancelable: true })); await flush();
+  assert.match(ui.document.querySelector("#testErr").textContent, /already opens the scenario\.js calendar/);
+  assert.deepEqual(created, []);
+  assert.equal(ui.document.querySelector("#testCreateBtn").disabled, false);
+  assert.equal(ui.navigations.length, 0);
+
+  const saved = [];
+  const editor = app({ search: "?test=ops-round-2", review: true, digest: async () => Buffer.from(scenario.openPasswordHash, "hex"), fetch: testFetch([
+    [/GET \/api\/tests\?slug=ops-round-2$/, () => response({ ok: true, test: sampleTest() })],
+    [/GET \/api\/tests$/, () => response({ ok: true, tests: [] })],
+    [/PUT \/api\/tests/, (url, options) => { saved.push(JSON.parse(options.body)); return response({ ok: true, test: {} }); }],
+  ]) });
+  t.after(editor.close); await flush();
+  editor.document.querySelector("#testPasswordInput").value = "default-password";
+  editor.document.querySelector("#testPassword").dispatchEvent(new editor.window.Event("submit", { cancelable: true })); await flush();
+  assert.match(editor.document.querySelector("#testErr").textContent, /already opens the scenario\.js calendar/);
+  assert.deepEqual(saved, []);
+  assert.equal(editor.errors.length, 0);
+});
+
+test("#reset leaves an activated test and then resets the default scenario on the reload it triggers", async t => {
+  const stored = JSON.stringify({ ...sampleTest(), password: "" });
+  const ui = app({ unlocked: false, search: "#reset", storage: { "cal-test:test": stored, ["cal-test:opened:" + scenario.name]: "1", [KEY]: JSON.stringify({ candidate: "OLD", events: [], dayNotes: {} }) } });
+  t.after(ui.close);
+  assert.equal(ui.window.localStorage.getItem("cal-test:test"), null);
+  assert.equal(ui.window.localStorage.getItem("cal-test:Ops round 2 (rev 3)"), null);
+  assert.equal(ui.navigations.length, 1);
+  // The default scenario's keys are untouched until the reload, which keeps #reset so they are cleared then.
+  assert.equal(ui.window.location.hash, "#reset");
+  assert.equal(ui.window.localStorage.getItem("cal-test:opened:" + scenario.name), "1");
+
+  const reloaded = app({ unlocked: false, search: "#reset", storage: { ["cal-test:opened:" + scenario.name]: "1", [KEY]: JSON.stringify({ candidate: "OLD", events: [], dayNotes: {} }) } });
+  t.after(reloaded.close);
+  assert.equal(reloaded.window.location.hash, "");
+  assert.equal(reloaded.window.localStorage.getItem("cal-test:opened:" + scenario.name), null);
+  assert.equal(reloaded.document.querySelector("#gateModal").hidden, false);
+  assert.notEqual(reloaded.document.querySelector("#candidateId").textContent, "OLD");
   assert.equal(reloaded.errors.length, 0);
 });

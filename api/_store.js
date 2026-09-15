@@ -1,5 +1,6 @@
+// Private Blob storage. The SDK reads BLOB_READ_WRITE_TOKEN from the environment.
 const { createHash, timingSafeEqual } = require("node:crypto");
-const { put, get, list, del } = require("@vercel/blob");
+const { put, get, list, del, BlobPreconditionFailedError } = require("@vercel/blob");
 const { parseSubmission, ValidationError, isSubmissionId } = require("../shared/submission");
 const { parseTest, SLUG_RE } = require("../shared/test");
 const PREFIX = "submissions/";
@@ -47,6 +48,7 @@ function decodeCursor(cursor) {
 const compareBlobs = (a, b) => b.time - a.time || a.path.localeCompare(b.path);
 
 async function listBlobs(prefix) {
+  // List lightweight metadata to find the newest page; download only that page's bodies.
   const blobs = [];
   let storageCursor;
   do {
@@ -87,25 +89,32 @@ async function deleteSubmission(id) {
   await del(PREFIX + id + ".json");
 }
 
-async function saveTest(test, { overwrite = false } = {}) {
+// Updates pass the etag from loadTest so two reviewers cannot both write over the same record.
+async function saveTest(test, { etag } = {}) {
   configured();
-  await put(TESTS + test.slug + ".json", JSON.stringify(test), {
-    access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: overwrite,
-  });
+  try {
+    await put(TESTS + test.slug + ".json", JSON.stringify(test), {
+      access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: !!etag, ifMatch: etag,
+    });
+  } catch (error) {
+    if (error instanceof BlobPreconditionFailedError) throw new ValidationError("This test changed since you opened it. Reload the page and try again.", 409);
+    throw error;
+  }
 }
 
-async function readTest(slug) {
+async function loadTest(slug) {
   configured();
   if (!SLUG_RE.test(slug)) return null;
   const response = await get(TESTS + slug + ".json", { access: "private", useCache: false });
   if (!response || response.statusCode !== 200) return null;
   const json = await new Response(response.stream).text();
-  try { return parseTest(json); }
+  try { return { test: parseTest(json), etag: response.blob.etag }; }
   catch (error) {
     if (error instanceof ValidationError) return null;
     throw error;
   }
 }
+const readTest = async slug => (await loadTest(slug))?.test || null;
 
 async function readAllTests() {
   configured();
@@ -146,4 +155,4 @@ function fail(res, error) {
   return res.status(error.status || 500).json({ ok: false, error: error.status ? error.message : "Server error" });
 }
 
-module.exports = { saveSubmission, listSubmissions, deleteSubmission, saveTest, readTest, listTests, findTestByPassword, cors, requireReviewer, fail };
+module.exports = { saveSubmission, listSubmissions, deleteSubmission, saveTest, loadTest, readTest, listTests, findTestByPassword, cors, requireReviewer, fail };

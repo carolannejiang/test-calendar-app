@@ -8,17 +8,23 @@ const { payload, serverPayload, flush } = require("./helpers.cjs");
 function backend() {
   const records = new Map(), writes = [], reads = [];
   let active = 0, maxActive = 0;
+  const hooks = { beforeWrite: null };
   const blob = {
+    BlobPreconditionFailedError: class BlobPreconditionFailedError extends Error {},
     async put(pathname, json, options) {
       writes.push({ pathname, options });
-      if (records.has(pathname) && !options.allowOverwrite) throw new Error("Already exists");
-      records.set(pathname, { json, uploadedAt: new Date() });
+      // Lets a test simulate another writer landing between a read and this write.
+      if (hooks.beforeWrite) { const hook = hooks.beforeWrite; hooks.beforeWrite = null; hook(pathname); }
+      const existing = records.get(pathname);
+      if (existing && !options.allowOverwrite) throw new Error("Already exists");
+      if (options.ifMatch && (!existing || existing.etag !== options.ifMatch)) throw new blob.BlobPreconditionFailedError();
+      records.set(pathname, { json, uploadedAt: new Date(), etag: "etag-" + writes.length });
     },
     async get(pathname) {
       reads.push(pathname); active++; maxActive = Math.max(maxActive, active);
       await flush(); active--;
       const record = records.get(pathname);
-      return record ? { statusCode: 200, stream: new Response(record.json).body } : null;
+      return record ? { statusCode: 200, stream: new Response(record.json).body, blob: { etag: record.etag } } : null;
     },
     async list({ cursor = "0" }) {
       const offset = Number(cursor);
@@ -44,7 +50,7 @@ function backend() {
     await load(name)({ method, body, query, headers: { "x-reviewer-password": password } }, response);
     return response;
   }
-  return { records, writes, reads, request, environment, maxActive: () => maxActive };
+  return { records, writes, reads, request, environment, hooks, maxActive: () => maxActive };
 }
 
 test("public POST generates immutable IDs and records server receipt time", async () => {
@@ -85,6 +91,7 @@ test("listing downloads one page with bounded concurrency and paginates without 
   assert.equal(first.body.submissions.length, 50); assert.equal(api.reads.length, 50);
   assert.equal(first.body.submissions[0].id, "ABCDEF-1104");
   assert(api.maxActive() > 1 && api.maxActive() <= 8);
+  // Deleting the cursor record does not cause the next page to skip or repeat entries.
   api.records.delete("submissions/" + first.body.submissions.at(-1).id + ".json");
   const second = await api.request("submissions", { query: { cursor: first.body.cursor } });
   const third = await api.request("submissions", { query: { cursor: second.body.cursor } });
@@ -119,18 +126,35 @@ test("reviewers create tests with activation passwords and candidates open them 
   const clash = await api.request("tests", { method: "POST", body: { title: "Second test", password: "fall-2026" } });
   assert.equal(clash.statusCode, 409); assert.match(clash.body.error, /already uses this activation password/);
   assert.equal(api.records.size, 1);
+  // Two reviewers creating the same title at once: the storage refuses the second write, which is reported as a conflict.
+  api.hooks.beforeWrite = pathname => api.records.set(pathname, { json: JSON.stringify({ ...created.body.test, slug: "third", title: "Third" }), uploadedAt: new Date(), etag: "raced" });
+  const raced = await api.request("tests", { method: "POST", body: { title: "Third", password: "third" } });
+  assert.equal(raced.statusCode, 409); assert.match(raced.body.error, /already exists/);
+  api.records.delete("tests/third.json");
 
   // PUT merges: the password alone keeps the calendar and revision; new events bump the revision.
+  // Every update names the revision it was based on, so two reviewers cannot both save as the same next revision.
   const events = [{ id: "a", title: "Kickoff", date: "2026-09-15", start: 600, end: 660, color: "blue", detail: "" }];
-  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { events: [null] } })).statusCode, 400);
-  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "nope" }, body: { events } })).statusCode, 404);
-  const updated = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { events, slug: "other", revision: 99 } });
+  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { revision: 1, events: [null] } })).statusCode, 400);
+  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "nope" }, body: { revision: 1, events } })).statusCode, 404);
+  for (const revision of [undefined, "1", 2, 99]) {
+    const stale = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { revision, events } });
+    assert.equal(stale.statusCode, 409, String(revision)); assert.match(stale.body.error, /changed since you opened it/);
+  }
+  const updated = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { events, slug: "other", revision: 1 } });
   assert.equal(updated.statusCode, 200); assert.equal(JSON.stringify(updated.body.test.events), JSON.stringify(events));
   assert.equal(updated.body.test.slug, "ops-round-2"); assert.equal(updated.body.test.revision, 2); assert.equal(updated.body.test.password, "fall-2026");
-  const renamed = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { password: "winter-2026" } });
+  assert.equal(api.writes.at(-1).options.ifMatch, "etag-1");
+  // A write that lands between reading the record and saving it is refused by the storage precondition.
+  api.hooks.beforeWrite = pathname => { api.records.get(pathname).etag = "someone-else"; };
+  const overlapped = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { revision: 2, password: "spring-2026" } });
+  assert.equal(overlapped.statusCode, 409); assert.match(overlapped.body.error, /changed since you opened it/);
+  api.records.get("tests/ops-round-2.json").etag = "etag-4";
+  const renamed = await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { revision: 2, password: "winter-2026" } });
+  assert.equal(renamed.statusCode, 200);
   assert.equal(renamed.body.test.revision, 2); assert.equal(renamed.body.test.password, "winter-2026");
   assert.equal(JSON.stringify(renamed.body.test.events), JSON.stringify(events));
-  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { password: "" } })).statusCode, 400);
+  assert.equal((await api.request("tests", { method: "PUT", query: { slug: "ops-round-2" }, body: { revision: 2, password: "" } })).statusCode, 400);
   assert.equal(api.records.size, 1); assert.equal(api.writes.at(-1).options.allowOverwrite, true);
 
   // Reading a test by slug needs the reviewer password; the activation password only works through /api/open.

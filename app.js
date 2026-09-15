@@ -1,16 +1,25 @@
 const $ = (s) => document.querySelector(s);
 const API = (SCENARIO.apiBase || "").replace(/\/$/, "");
 const hasBackend = () => !!API || /^https?:$/.test(location.protocol);
-const local = CalendarStorage.createStorage(() => localStorage, () => { $("#storageNotice").hidden = false; });
+let storageBlocked = false;
+const local = CalendarStorage.createStorage(() => localStorage, () => { storageBlocked = true; $("#storageNotice").hidden = false; });
 const session = CalendarStorage.createStorage(() => sessionStorage);
 const load = k => { try { return JSON.parse(local.get(k)); } catch { return null; } };
 const store = (k, v) => local.set(k, JSON.stringify(v));
 const PW_KEY = "cal-test:reviewer-pw";
+// The scenario.js password is checked first at the gate, so no test may reuse it.
+const DEFAULT_OPEN_HASH = SCENARIO.openPasswordHash || "";
+// Reviewer routes: #review, #review=<code>, #edit (edit the current test's starting calendar), or ?review.
+const reviewRoute = () => ({
+  code: (location.hash.match(/^#review=(.+)$/) || [])[1] || null,
+  editing: location.hash === "#edit",
+  reviewing: /^#review(=.+)?$/.test(location.hash) || location.hash === "#edit" || new URLSearchParams(location.search).has("review"),
+});
 // The reviewer-created test this browser activated with its password; it replaces scenario.js until #reset.
 const TEST_KEY = "cal-test:test";
 // A test's revision is part of its scenario name, so saving a new starting calendar starts everyone fresh.
 const scenarioFor = (test) => ({ ...SCENARIO, name: `${test.title} (rev ${test.revision})`, events: test.events, openPasswordHash: "",
-  test: { slug: test.slug, title: test.title, password: test.password }, defaultName: SCENARIO.name });
+  test: { slug: test.slug, title: test.title, password: test.password, revision: test.revision }, defaultName: SCENARIO.name });
 
 function startApp(SCENARIO) {
   // ---------- helpers ----------
@@ -18,7 +27,7 @@ function startApp(SCENARIO) {
   const { parseSubmission, packEvent, unpackEvent, encodePayload, decodePayload, COLORS, isDate } = CalendarSubmission;
   const { submissionKey, sameResponse, mergeSubmissions, sortSubmissions } = CalendarReview;
   const { attachBullets } = CalendarNotes;
-  const { slugify, parseTest } = CalendarTest;
+  const { slugify, parseTest, MAX_DETAIL } = CalendarTest;
   const hm = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
   const mins = (v, dflt) => typeof v === "number" ? v : (typeof v === "string" && v.includes(":") ? hm(v) : dflt);
   let HOUR = 48;
@@ -41,6 +50,7 @@ function startApp(SCENARIO) {
   const SEED_BY_ID = new Map(SEED.map((e) => [e.id, e]));
   const isMoved = (e) => { const s0 = state.compareSeed && SEED_BY_ID.get(e.id); return !!s0 && (e.date !== s0.date || e.start !== s0.start || e.end !== s0.end); };
 
+  // ---------- storage ----------
   const KEY = "cal-test:" + SCENARIO.name;
   const REVIEW_KEY = "cal-test:review:" + SCENARIO.name;
   function loadDraft() {
@@ -60,13 +70,17 @@ function startApp(SCENARIO) {
     for (const b of r) s += A[b % A.length]; return s;
   }
 
+  // ---------- state ----------
   const GATE_KEY = "cal-test:opened:" + SCENARIO.name;
   const SUBMITTED_KEY = "cal-test:submitted:" + SCENARIO.name;
   if (location.hash === "#reset") {
-    local.remove(KEY); local.remove(GATE_KEY); local.remove(SUBMITTED_KEY); location.hash = "";
+    local.remove(KEY); local.remove(GATE_KEY); local.remove(SUBMITTED_KEY);
+    // Leaving a test returns to scenario.js, whose own draft, gate, and lock are reset by the reload that follows.
     if (SCENARIO.test) { local.remove(TEST_KEY); location.reload(); return; }
+    location.hash = "";
   }
-  const isReviewUrl = /^#(review|edit)/.test(location.hash) || new URLSearchParams(location.search).has("review");
+  const isReviewUrl = reviewRoute().reviewing;
+  // Once submitted, the response is locked for this candidate ID until the scenario changes or #reset is used.
   let submitted = load(SUBMITTED_KEY);
   if (!submitted || typeof submitted.candidate !== "string" || typeof submitted.code !== "string") submitted = null;
   // The gate also activates reviewer-created tests, so it shows whenever a backend may hold some.
@@ -91,6 +105,7 @@ function startApp(SCENARIO) {
   function persist() { if (!state.readOnly && !build.on) store(KEY, { candidate: state.candidate, events: state.events, dayNotes: state.dayNotes, openedAt: state.openedAt, activeSec: state.activeSec }); }
   persist();
 
+  // time on page: counts seconds while the tab is visible, saved every few seconds
   const fmtClock = (sec) => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return h ? `${h}:${pad(m)}:${pad(s2)}` : `${m}:${pad(s2)}`; };
   const drawTimer = () => { $("#timerText").textContent = fmtClock(state.activeSec); };
   drawTimer();
@@ -107,6 +122,7 @@ function startApp(SCENARIO) {
   window.addEventListener("pagehide", () => persist());
   const fmtDur = (sec) => { sec = Math.round(sec); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return h ? `${h}h ${pad(m)}m` : `${m}m ${pad(s2)}s`; };
 
+  // ---------- DOM refs ----------
   const cal = $("#cal"), grid = $("#grid"), dayHeads = $("#dayHeads");
   const popup = $("#popup");
   const popTitle = $("#popTitle"), popDate = $("#popDate"), popStart = $("#popStart"), popEnd = $("#popEnd"), popNotes = $("#popNotes");
@@ -120,6 +136,7 @@ function startApp(SCENARIO) {
   }
   popEnd.add(new Option(fmtTime(DAY_END), DAY_END));
 
+  // ---------- rendering ----------
   function fitHours() {
     const head = cal.querySelector(".head");
     const foot = $("#dayNotes"), footTitle = $("#dayNotesTitle");
@@ -254,6 +271,8 @@ function startApp(SCENARIO) {
     drawNow();
   }
 
+  // Simulated clock: it is 9:00 AM on the Monday of the scenario week when the candidate
+  // first opens the app, and runs forward in real time from there.
   const SIM_START = (() => { const d = addDays(state.weekStart, 1); d.setHours(9, 0, 0, 0); return d; })();
   const simNow = () => new Date(SIM_START.getTime() + (Date.now() - Date.parse(state.openedAt)));
   function drawNow() {
@@ -270,6 +289,7 @@ function startApp(SCENARIO) {
   }
   setInterval(drawNow, 30000);
 
+  // ---------- pointer interactions ----------
   const drag = { active: false };
   function colAt(x) {
     for (const c of grid.querySelectorAll(".daycol")) { const r = c.getBoundingClientRect(); if (x >= r.left && x < r.right) return c; }
@@ -349,6 +369,7 @@ function startApp(SCENARIO) {
     if (el && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openPopup(el.dataset.id); }
   });
 
+  // ---------- popup ----------
   let popId = null;
   function openPopup(id) {
     const e = evById(id); if (!e) return;
@@ -358,6 +379,7 @@ function startApp(SCENARIO) {
     popTitle.value = e.title; popNotes.value = (build.on ? e.detail : e.notes) || ""; popDate.value = e.date;
     $("#popNotesLabel").textContent = build.on ? "Details shown under the event (optional)" : "Additional notes or reasoning";
     popNotes.placeholder = build.on ? "Optional: e.g. Recurring, every other week" : "Optional: why you scheduled it this way, anything the reviewer should know";
+    popNotes.maxLength = build.on ? MAX_DETAIL : 20000;
     const meta = build.on ? "" : [e.location, e.detail].filter(Boolean).join(" \u00b7 "); $("#popMeta").textContent = meta; $("#popMeta").hidden = !meta;
     const del = !!e.deleted;
     $("#popDeletedNote").hidden = !del; $("#popSave").hidden = del;
@@ -421,6 +443,7 @@ function startApp(SCENARIO) {
     closePopup(false);
   });
 
+  // ---------- instructions ----------
   if (SCENARIO.instructions) {
     $("#instrBtn").hidden = false; $("#instrText").textContent = SCENARIO.instructions;
     $("#instrBtn").addEventListener("click", () => { $("#instrModal").hidden = false; });
@@ -428,6 +451,7 @@ function startApp(SCENARIO) {
     $("#instrModal").addEventListener("click", (ev) => { if (ev.target === ev.currentTarget) ev.currentTarget.hidden = true; });
   }
 
+  // ---------- submission codes ----------
   function serialize() {
     const d = {}; for (const [k, v] of Object.entries(state.dayNotes)) if (v && v.trim()) d[k] = v.trim();
     return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(), o: state.openedAt, a: state.activeSec, d,
@@ -443,6 +467,7 @@ function startApp(SCENARIO) {
     if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
   }
+  // Locks the calendar and shows the submission screen. The screen cannot be dismissed.
   function showSubmitted(saving = false) {
     closePopup(false);
     state.readOnly = true; document.body.classList.add("readonly");
@@ -467,7 +492,7 @@ function startApp(SCENARIO) {
     if (!hasBackend()) { showSubmitted(); return; }
     showSubmitted(true);
     try { await postSubmission(payload); submitted.saved = true; store(SUBMITTED_KEY, submitted); }
-    catch {}
+    catch { /* the locked screen offers the backup code and a retry */ }
     showSubmitted();
   }
   $("#submitBtn").addEventListener("click", () => {
@@ -489,6 +514,7 @@ function startApp(SCENARIO) {
   });
   $("#copyCodeBtn").addEventListener("click", () => copy(submitted.code, "Code"));
 
+  // ---------- reviewer view ----------
   function renderChanges(evs, label) {
     const container = $("#changes");
     container.replaceChildren();
@@ -643,6 +669,7 @@ function startApp(SCENARIO) {
           try { await deleteServerSub(p); }
           catch (error) { alert("Could not delete: " + error.message); remove.disabled = false; return; }
         }
+        // A concurrent refresh may have reordered or reintroduced the record.
         review.deleted.add(key);
         updateReview(review.subs.filter(value => submissionKey(value) !== key));
       });
@@ -709,7 +736,7 @@ function startApp(SCENARIO) {
     const events = state.events.filter(e => !e._new).map(({ id, title, date, start, end, color, detail }) => ({ id, title, date, start, end, color, detail }));
     const button = $("#testSave"); button.disabled = true; showTestError(null);
     try {
-      await reviewerJson("/api/tests?slug=" + encodeURIComponent(currentTest.slug), { method: "PUT", body: JSON.stringify({ title: currentTest.title, events }) });
+      await reviewerJson("/api/tests?slug=" + encodeURIComponent(currentTest.slug), { method: "PUT", body: JSON.stringify({ revision: currentTest.revision, events }) });
       // The saved revision is part of the scenario name, so reload to derive everything from it.
       session.set(TOAST_KEY, "Starting calendar saved"); location.reload();
     } catch (error) { showTestError(error); button.disabled = false; }
@@ -723,7 +750,8 @@ function startApp(SCENARIO) {
     if (!password) return;
     button.disabled = true; showTestError(null);
     try {
-      await reviewerJson("/api/tests?slug=" + encodeURIComponent(currentTest.slug), { method: "PUT", body: JSON.stringify({ password }) });
+      await checkNotDefaultPassword(password);
+      await reviewerJson("/api/tests?slug=" + encodeURIComponent(currentTest.slug), { method: "PUT", body: JSON.stringify({ revision: currentTest.revision, password }) });
       session.set(TOAST_KEY, "Activation password saved"); location.reload();
     } catch (error) { showTestError(error); button.disabled = false; }
   });
@@ -734,6 +762,7 @@ function startApp(SCENARIO) {
     if (!password) { showTestError(new Error("Set an activation password for the test")); return; }
     button.disabled = true; showTestError(null);
     try {
+      await checkNotDefaultPassword(password);
       const { test } = await reviewerJson("/api/tests", { method: "POST", body: JSON.stringify({ title, password }) });
       location.href = testUrl(test.slug, "#edit");
     } catch (error) { showTestError(error); button.disabled = false; }
@@ -743,6 +772,11 @@ function startApp(SCENARIO) {
   async function sha256Hex(text) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function checkNotDefaultPassword(password) {
+    if (DEFAULT_OPEN_HASH && await sha256Hex(password) === DEFAULT_OPEN_HASH) {
+      throw new Error("That password already opens the scenario.js calendar. Choose a different activation password.");
+    }
   }
   function reviewerUnlocked() {
     const h = SCENARIO.reviewerPasswordHash;
@@ -823,11 +857,17 @@ function startApp(SCENARIO) {
         if (response.status === 404) return false;
         if (!response.ok || !body.ok) throw new Error(body.error || `HTTP ${response.status}`);
         opened = parseTest(body.test);
+        // The test only survives the reload below through browser storage.
+        store(TEST_KEY, opened);
+        if (storageBlocked) {
+          local.remove(TEST_KEY);
+          throw new Error("This browser blocks site storage, so this test cannot be opened here. Allow storage for this site or use another browser, then try again.");
+        }
         return true;
       },
       onSuccess: () => {
         // A reviewer-created test replaces the scenario, so start over from it.
-        if (opened) { store(TEST_KEY, opened); location.reload(); return; }
+        if (opened) { location.reload(); return; }
         gated = false; local.set(GATE_KEY, "1");
         if (!state.openedAt) state.openedAt = new Date().toISOString();
         persist(); render();
@@ -886,13 +926,12 @@ function startApp(SCENARIO) {
     $(selector).addEventListener("click", () => { state.weekStart = addDays(state.weekStart, days); buildDayNotes(); render(); });
   }
   function routeFromHash() {
-    const match = location.hash.match(/^#review=(.+)$/);
-    const editing = location.hash === "#edit" && !!currentTest;
-    const reviewing = !!match || editing || location.hash === "#review" || new URLSearchParams(location.search).has("review");
+    const { code, editing, reviewing } = reviewRoute();
     if (reviewing) {
-      try { enterReview(match && match[1], editing); }
+      // #edit without a loaded test still needs the reviewer password; it must never skip the start gate.
+      try { enterReview(code, editing && !!currentTest); }
       catch (error) { openCodeModal(error.message); }
-      if (match || editing) history.replaceState(null, "", location.href.split("#")[0] + "#review");
+      if (code || editing) history.replaceState(null, "", location.href.split("#")[0] + "#review");
     } else if (review.on) exitReview();
   }
 
@@ -908,7 +947,7 @@ function startApp(SCENARIO) {
 (() => {
   const params = new URLSearchParams(location.search);
   const slug = params.get("test");
-  const reviewing = /^#(review|edit)/.test(location.hash) || params.has("review");
+  const { reviewing } = reviewRoute();
   if (slug && reviewing && session.get(PW_KEY)) {
     fetch(API + "/api/tests?slug=" + encodeURIComponent(slug), { headers: { "X-Reviewer-Password": session.get(PW_KEY) } })
       .then(async (response) => {
