@@ -207,7 +207,8 @@ button { font: inherit; color: inherit; }
 .ev::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--ev-bar); }
 .ev .t { font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ev .w { display: block; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.ev .d { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; font-style: italic; }
+.ev .d { position: absolute; left: 8px; right: 6px; bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .85; font-style: italic; }
+.ev.dense .d { bottom: 1px; }
 .ev.dense { font-size: 11px; line-height: 1.15; padding-top: 1px; padding-bottom: 1px; }
 .ev.short { padding-top: 1px; padding-bottom: 1px; line-height: 1.2; font-size: 11px; }
 .ev.short .t { display: inline; }
