@@ -969,7 +969,7 @@ button { font: inherit; color: inherit; }
     if (!hasBackend()) { st.className = "submit-status"; st.textContent = "Copy the code below and send it to us. It contains your calendar and your anonymous candidate ID, nothing else."; showCode(true); return; }
     try {
       await postSubmission(payload);
-      st.className = "submit-status ok"; st.textContent = "\u2713 Saved. Your calendar has been sent to the hiring team. You can close this window.";
+      st.className = "submit-status ok"; st.textContent = "\u2713 Submitted. Your response has been sent to the team. Please paste your candidate code to the work trial doc, and you can now close this window.";
     } catch (e) {
       st.className = "submit-status bad"; st.textContent = "We couldn\u2019t save this automatically. Please copy the code below and send it to us."; showCode(true);
     }
