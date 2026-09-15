@@ -87,12 +87,14 @@ function cors(req, res) {
   return false;
 }
 
-function reviewerOk(req) {
+function requireReviewer(req) {
   const expected = process.env.REVIEWER_PASSWORD;
+  if (!expected) throw new ValidationError("REVIEWER_PASSWORD is not set on the server", 503);
   const given = req.headers["x-reviewer-password"];
-  if (!expected || typeof given !== "string") return false;
   const digest = text => createHash("sha256").update(text, "utf8").digest();
-  return timingSafeEqual(digest(given), digest(expected));
+  if (typeof given !== "string" || !timingSafeEqual(digest(given), digest(expected))) {
+    throw new ValidationError("Wrong reviewer password", 401);
+  }
 }
 
 function fail(res, error) {
@@ -100,4 +102,4 @@ function fail(res, error) {
   return res.status(error.status || 500).json({ ok: false, error: error.status ? error.message : "Server error" });
 }
 
-module.exports = { saveSubmission, listSubmissions, deleteSubmission, cors, reviewerOk, fail };
+module.exports = { saveSubmission, listSubmissions, deleteSubmission, cors, requireReviewer, fail };

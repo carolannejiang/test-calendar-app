@@ -13,7 +13,7 @@ module.exports = [
     files: ["app.js", "scenario.js", "shared/*.js"],
     languageOptions: {
       sourceType: "script",
-      globals: { ...globals.browser, CalendarCore: "readonly", CalendarSubmission: "readonly", CalendarReview: "readonly", CalendarStorage: "readonly" },
+      globals: { ...globals.browser, CalendarCore: "readonly", CalendarSubmission: "readonly", CalendarReview: "readonly", CalendarStorage: "readonly", CalendarNotes: "readonly" },
     },
   },
   { files: ["app.js"], languageOptions: { globals: { SCENARIO: "readonly" } } },
