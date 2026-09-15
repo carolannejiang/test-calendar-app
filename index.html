@@ -196,15 +196,17 @@ button { font: inherit; color: inherit; }
 }
 .daycol.past, .allday.past { background-color: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
 
-.foot { border-top: 1px solid var(--line); background: var(--bg); }
-.foot .foot-label { font-size: 11px; color: var(--muted); text-align: right; padding: 8px 8px 0 0; }
-.foot .cell { border-left: 1px solid var(--line); padding: 6px 6px 8px; }
-.foot textarea {
-  width: 100%; height: 72px; resize: none; user-select: text; font: 12px/1.35 Roboto, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text); background: var(--bg-soft); border: 1px solid transparent; border-radius: 6px; padding: 6px;
+.foot-title {
+  border-top: 1px solid var(--line); padding: 4px 0 2px calc(var(--gutter) + 6px);
+  font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
 }
-.foot textarea::placeholder { color: var(--muted); }
-.foot textarea:focus { border-color: var(--accent); outline: none; background: var(--bg); }
+.foot { background: var(--bg); }
+.foot .cell { border-left: 1px solid var(--line); }
+.foot textarea {
+  display: block; width: 100%; height: 72px; resize: none; user-select: text; font: 12px/1.35 Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text); background: transparent; border: 0; padding: 4px 6px 8px;
+}
+.foot textarea:focus { outline: none; background: var(--bg-soft); }
 .foot textarea:disabled { color: var(--text-2); opacity: 1; }
 
 /* ---------- events ---------- */
@@ -367,6 +369,7 @@ button { font: inherit; color: inherit; }
         <div class="head-row days" id="dayHeads"></div>
       </div>
       <div class="grid" id="grid"></div>
+      <div class="foot-title" id="dayNotesTitle">Your reasoning or notes</div>
       <div class="head-row foot" id="dayNotes"></div>
     </div>
   </div>
@@ -508,8 +511,8 @@ button { font: inherit; color: inherit; }
   // ---------- rendering ----------
   function fitHours() {
     const head = cal.querySelector(".head");
-    const foot = $("#dayNotes");
-    const avail = cal.clientHeight - (head ? head.offsetHeight : 0) - (foot ? foot.offsetHeight : 0);
+    const foot = $("#dayNotes"), footTitle = $("#dayNotesTitle");
+    const avail = cal.clientHeight - (head ? head.offsetHeight : 0) - (foot ? foot.offsetHeight : 0) - (footTitle ? footTitle.offsetHeight : 0);
     const next = Math.max(36, Math.floor(avail / HOURS));
     if (next === HOUR) return false;
     HOUR = next; cal.style.setProperty("--hour", HOUR + "px"); return true;
@@ -561,12 +564,12 @@ button { font: inherit; color: inherit; }
   }
 
   function buildDayNotes() {
-    const foot = $("#dayNotes"); foot.innerHTML = `<div class="foot-label">Notes</div>`;
+    const foot = $("#dayNotes"); foot.innerHTML = `<div></div>`;
     for (let i = 0; i < 7; i++) {
       const ds = fmtDate(addDays(state.weekStart, i));
       const cell = document.createElement("div"); cell.className = "cell";
       const ta = document.createElement("textarea"); ta.id = "dn-" + ds; ta.dataset.date = ds;
-      ta.placeholder = "Your reasoning or notes"; ta.setAttribute("aria-label", `Notes for ${fmtLongDate(ds)}`);
+      ta.setAttribute("aria-label", `Your reasoning or notes for ${fmtLongDate(ds)}`);
       ta.addEventListener("input", () => { state.dayNotes[ds] = ta.value; persist(); });
       cell.appendChild(ta); foot.appendChild(cell);
     }
