@@ -587,11 +587,15 @@
     const body = await response.json();
     if (!response.ok || !body.ok) throw new Error(body.error || `HTTP ${response.status}`);
   }
+  $("#subSearch").addEventListener("input", reviewRenderList);
   $("#serverRefresh").addEventListener("click", () => loadServerSubs());
   $("#serverMore").addEventListener("click", () => loadServerSubs(true));
   function reviewRenderList() {
     const ul = $("#subList"); ul.replaceChildren();
-    review.subs.forEach(p => {
+    const query = $("#subSearch").value.trim().toUpperCase();
+    const shown = review.subs.filter(p => p.c.includes(query));
+    $("#subEmpty").hidden = !(query && review.subs.length && !shown.length);
+    shown.forEach(p => {
       const key = submissionKey(p);
       const li = document.createElement("li");
       const button = document.createElement("button"); button.className = "submission" + (key === review.active ? " active" : "");
