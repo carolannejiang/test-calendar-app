@@ -34,9 +34,10 @@ There is no build step. HTML, CSS, and JavaScript are served directly. `scenario
 - `scenario.js` — scenario name, date, visible hours, instructions, starting events, and password hashes.
 - `app.js` — calendar interactions, candidate progress, and reviewer UI.
 - `shared/submission.js` — shared payload validation, named event packing/unpacking, and C1/B1 backup codecs.
-- `shared/calendar.js` — date formatting, overlap layout, and change descriptions with an explicit starting calendar.
+- `shared/calendar.js` — date formatting, overlap layout, and change descriptions that reuse the starting calendar's ID lookup.
 - `shared/review.js` — stable submission identity, ordering, and cache reconciliation.
 - `shared/storage.js` — guarded browser storage with a memory fallback.
+- `shared/notes.js` — reusable bullet-list editing for note fields, including listener cleanup.
 - `api/submit.js` — `POST /api/submit`, validates and creates an immutable response.
 - `api/submissions.js` — authenticated `GET /api/submissions?cursor=…` and `DELETE /api/submissions?id=…`.
 - `api/_store.js` — private Blob access, pagination, and reviewer authentication.

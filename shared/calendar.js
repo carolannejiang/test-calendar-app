@@ -37,20 +37,19 @@
     }
     return evs;
   }
-  function describeChanges(evs, seed) {
-    const seedById = Object.fromEntries(seed.map((e) => [e.id, e]));
-    const nowById = Object.fromEntries(evs.map((e) => [e.id, e]));
+  function describeChanges(evs, seedById) {
+    const nowById = new Map(evs.map((e) => [e.id, e]));
     const when = (e) => e.allDay ? `${fmtLongDate(e.date)}, all day` : `${fmtLongDate(e.date)}, ${fmtRange(e.start, e.end)}`;
     const out = [];
-    for (const s of seed) {
-      const n = nowById[s.id];
+    for (const s of seedById.values()) {
+      const n = nowById.get(s.id);
       if (!n || n.deleted) { out.push({ kind: "deleted", text: `${s.title || "(No title)"}`, from: when(s) + (n && n.notes ? ` \u00b7 Notes: ${n.notes}` : "") }); continue; }
       const timeChanged = n.date !== s.date || n.allDay !== s.allDay || n.start !== s.start || n.end !== s.end;
       if (timeChanged) out.push({ kind: "moved", text: `${n.title || "(No title)"} \u2192 ${when(n)}`, from: `was ${when(s)}` });
       if (n.title !== s.title) out.push({ kind: "renamed", text: `"${s.title || "(No title)"}" \u2192 "${n.title || "(No title)"}"` });
       if ((n.notes || "") !== (s.notes || "")) out.push({ kind: "notes", text: `${n.title || "(No title)"}`, from: n.notes || "(notes removed)" });
     }
-    for (const n of evs) if (!seedById[n.id]) out.push({ kind: "added", text: `${n.title || "(No title)"}`, from: when(n) + (n.notes ? ` \u00b7 Notes: ${n.notes}` : "") });
+    for (const n of evs) if (!seedById.has(n.id)) out.push({ kind: "added", text: `${n.title || "(No title)"}`, from: when(n) + (n.notes ? ` \u00b7 Notes: ${n.notes}` : "") });
     return out;
   }
   return { pad, toDate, fmtDate, addDays, DAYS, MONTHS, fmtTime, fmtHour, fmtRange, fmtLongDate, layoutColumns, describeChanges };

@@ -13,7 +13,7 @@ const payload = (overrides = {}) => ({ v: 1, c: "ABCDEF", s: scenario.name, t: "
 const serverPayload = (overrides = {}) => ({ ...payload(), id: "01234567-89ab-4cde-8fab-0123456789ab", receivedAt: "2026-09-15T10:00:00.000Z", ...overrides });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function app({ review = false, fetch, draft, submitted, blockedStorage = false, unlocked = true, reviewerUnlocked = true } = {}) {
+function app({ review = false, fetch, draft, submitted, blockedStorage = false, unlocked = true, reviewerUnlocked = true, digest } = {}) {
   const errors = [], calls = [], alerts = [], timers = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", error => errors.push(error));
@@ -21,7 +21,7 @@ function app({ review = false, fetch, draft, submitted, blockedStorage = false, 
   const dom = new JSDOM(html, { url: "https://calendar-test.invalid/" + (review ? "#review" : ""), runScripts: "outside-only", virtualConsole });
   const window = dom.window;
   window.TextEncoder = TextEncoder; window.TextDecoder = TextDecoder;
-  Object.defineProperty(window.crypto, "subtle", { value: webcrypto.subtle });
+  Object.defineProperty(window.crypto, "subtle", { value: digest ? { digest } : webcrypto.subtle });
   if (unlocked) window.localStorage.setItem("cal-test:opened:" + scenario.name, "1");
   if (draft) window.localStorage.setItem(KEY, JSON.stringify(draft));
   if (submitted) window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify(submitted));
@@ -36,7 +36,7 @@ function app({ review = false, fetch, draft, submitted, blockedStorage = false, 
     if (fetch) return fetch(url, options);
     return response({ ok: true, submissions: [], cursor: null });
   };
-  const scripts = ["scenario.js", "shared/submission.js", "shared/calendar.js", "shared/review.js", "shared/storage.js", "app.js"];
+  const scripts = ["scenario.js", "shared/submission.js", "shared/calendar.js", "shared/review.js", "shared/storage.js", "shared/notes.js", "app.js"];
   window.eval(scripts.map(file => fs.readFileSync(path.join(root, file), "utf8")).join("\n"));
   return { window, document: window.document, errors, calls, alerts, timers, close: () => window.close() };
 }

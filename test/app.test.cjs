@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { app, response, flush, payload, serverPayload, KEY, SUBMITTED_KEY } = require("./helpers.cjs");
+const { app, response, flush, payload, serverPayload, scenario, KEY, SUBMITTED_KEY } = require("./helpers.cjs");
 const { encodePayload, decodePayload } = require("../shared/submission");
 
 test("page initializes in standards mode and rejects an injected backup code", async t => {
@@ -192,4 +192,59 @@ test("network failure keeps the lock, exposes a valid backup code, and allows a 
   assert.equal(ui.document.querySelector("#submitTitle").textContent, "Your response has been submitted.");
   assert.equal(ui.document.querySelector("#retryBtn").hidden, true);
   assert.equal(JSON.parse(ui.window.localStorage.getItem(SUBMITTED_KEY)).saved, true);
+});
+
+test("reviewer dialog cancels pending checks and reopens without stale handlers", async t => {
+  let finishDigest, checks = 0;
+  const ui = app({ review: true, unlocked: false, reviewerUnlocked: false, digest: () => {
+    checks++;
+    return new Promise(resolve => { finishDigest = resolve; });
+  } });
+  t.after(ui.close);
+  const input = ui.document.querySelector("#pwInput");
+  const unlock = ui.document.querySelector("#pwUnlock");
+  input.value = "cancelled-password";
+  unlock.click();
+  input.dispatchEvent(new ui.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  assert.equal(checks, 1);
+  ui.document.querySelector("#pwCancel").click();
+  finishDigest(Buffer.from(scenario.reviewerPasswordHash, "hex")); await flush();
+  assert.equal(ui.document.querySelector("#reviewSide").hidden, true);
+  assert.equal(ui.window.sessionStorage.getItem("cal-test:reviewer-ok"), null);
+  assert.equal(ui.document.querySelector("#gateModal").hidden, false);
+
+  ui.window.history.replaceState(null, "", "#review");
+  ui.window.dispatchEvent(new ui.window.HashChangeEvent("hashchange"));
+  ui.window.dispatchEvent(new ui.window.HashChangeEvent("hashchange"));
+  input.value = "checked-password";
+  unlock.click();
+  input.value = "edited-while-waiting";
+  assert.equal(checks, 2);
+  finishDigest(Buffer.from(scenario.reviewerPasswordHash, "hex")); await flush();
+  assert.equal(ui.document.querySelector("#reviewSide").hidden, false);
+  assert.equal(ui.window.sessionStorage.getItem("cal-test:reviewer-pw"), "checked-password");
+  assert.equal(ui.calls.length, 1);
+  unlock.click();
+  assert.equal(checks, 2);
+  assert.equal(ui.errors.length, 0);
+});
+
+test("successful gate unlock removes its click and keyboard handlers", async t => {
+  let checks = 0;
+  const ui = app({ unlocked: false, digest: async () => {
+    checks++;
+    return Buffer.from(scenario.openPasswordHash, "hex");
+  } });
+  t.after(ui.close);
+  const input = ui.document.querySelector("#gateInput");
+  const start = ui.document.querySelector("#gateStart");
+  input.value = "synthetic-test-password";
+  start.click(); await flush();
+  assert.equal(ui.document.querySelector("#gateModal").hidden, true);
+  assert.equal(ui.window.localStorage.getItem("cal-test:opened:" + scenario.name), "1");
+  assert(JSON.parse(ui.window.localStorage.getItem(KEY)).openedAt);
+  start.click();
+  input.dispatchEvent(new ui.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  assert.equal(checks, 1);
+  assert.equal(ui.errors.length, 0);
 });

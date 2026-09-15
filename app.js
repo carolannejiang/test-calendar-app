@@ -4,6 +4,7 @@
   const { pad, toDate, fmtDate, addDays, DAYS, MONTHS, fmtTime, fmtHour, fmtRange, fmtLongDate, layoutColumns, describeChanges } = CalendarCore;
   const { parseSubmission, packEvent, unpackEvent, encodePayload, decodePayload, COLORS, isDate } = CalendarSubmission;
   const { submissionKey, sameResponse, mergeSubmissions, sortSubmissions } = CalendarReview;
+  const { attachBullets } = CalendarNotes;
   const hm = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
   const mins = (v, dflt) => typeof v === "number" ? v : (typeof v === "string" && v.includes(":") ? hm(v) : dflt);
   let HOUR = 48;
@@ -23,8 +24,8 @@
   }
   const clone = (evs) => evs.map((e) => ({ ...e }));
   const SEED = SCENARIO.events.map(normalize);
-  const SEED_BY_ID = Object.fromEntries(SEED.map((e) => [e.id, e]));
-  const isMoved = (e) => { const s0 = state.compareSeed && SEED_BY_ID[e.id]; return !!s0 && (e.date !== s0.date || e.start !== s0.start || e.end !== s0.end); };
+  const SEED_BY_ID = new Map(SEED.map((e) => [e.id, e]));
+  const isMoved = (e) => { const s0 = state.compareSeed && SEED_BY_ID.get(e.id); return !!s0 && (e.date !== s0.date || e.start !== s0.start || e.end !== s0.end); };
 
   // ---------- storage ----------
   const KEY = "cal-test:" + SCENARIO.name;
@@ -182,40 +183,6 @@
       ex.addEventListener("click", () => openNotesModal(ds));
       cell.appendChild(ta); cell.appendChild(ex); foot.appendChild(cell);
     }
-  }
-  // Bullet lists in notes: typing "- " or "* " at the start of a line becomes a bullet,
-  // Enter continues the list, Enter on an empty bullet ends it.
-  const BULLET = "\u2022 ";
-  function attachBullets(ta) {
-    const lineStart = (v, pos) => v.lastIndexOf("\n", pos - 1) + 1;
-    ta.addEventListener("input", () => {
-      const v = ta.value, pos = ta.selectionStart, ls = lineStart(v, pos);
-      let le = v.indexOf("\n", pos); if (le < 0) le = v.length;
-      const m = v.slice(ls, le).match(/^(\s*)[-*]\s(.*)$/);
-      if (m) {
-        const prefixLen = m[1].length + 2;
-        ta.value = v.slice(0, ls) + m[1] + BULLET + m[2] + v.slice(le);
-        const np = pos - prefixLen + m[1].length + BULLET.length;
-        ta.selectionStart = ta.selectionEnd = Math.max(ls + m[1].length + BULLET.length, np);
-      }
-    });
-    ta.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing) return;
-      const v = ta.value, pos = ta.selectionStart, ls = lineStart(v, pos);
-      let le = v.indexOf("\n", pos); if (le < 0) le = v.length;
-      const m = v.slice(ls, le).match(/^(\s*)\u2022 (.*)$/);
-      if (!m) return;
-      ev.preventDefault();
-      if (m[2].trim() === "" && pos >= le) {
-        ta.value = v.slice(0, ls) + v.slice(le);
-        ta.selectionStart = ta.selectionEnd = ls;
-      } else {
-        const ins = "\n" + m[1] + BULLET;
-        ta.value = v.slice(0, pos) + ins + v.slice(ta.selectionEnd);
-        ta.selectionStart = ta.selectionEnd = pos + ins.length;
-      }
-      ta.dispatchEvent(new Event("input", { bubbles: true }));
-    });
   }
   let notesModalDate = null;
   attachBullets($("#notesModalText"));
@@ -424,7 +391,7 @@
   $("#popClose").addEventListener("click", () => closePopup(false));
   $("#popDelete").addEventListener("click", () => {
     const e = evById(popId); if (!e) return;
-    if (SEED_BY_ID[e.id]) {
+    if (SEED_BY_ID.has(e.id)) {
       e.deleted = !e.deleted; persist();
       hidePopup(); toast(e.deleted ? "Event deleted" : "Event restored");
     } else {
@@ -524,7 +491,7 @@
     container.replaceChildren();
     if (!evs) return;
     const heading = document.createElement("h3"); heading.textContent = label; container.appendChild(heading);
-    const changes = state.compareSeed ? describeChanges(evs, SEED) : [];
+    const changes = state.compareSeed ? describeChanges(evs, SEED_BY_ID) : [];
     if (!state.compareSeed || !changes.length) {
       const message = document.createElement("div"); message.className = "none";
       message.textContent = state.compareSeed ? "No changes from the starting calendar." :
@@ -580,7 +547,7 @@
     state.dayNotes = p.d;
     state.events = p.e.map(tuple => {
       const event = unpackEvent(tuple);
-      const original = state.compareSeed ? SEED_BY_ID[event.id] : null;
+      const original = state.compareSeed ? SEED_BY_ID.get(event.id) : null;
       return { ...event, location: original?.location || "", detail: original?.detail || "" };
     });
     if (!preserveWeek) {
@@ -693,45 +660,81 @@
     if (!h) return !hasBackend() || !!reviewerPw();
     return session.get(PW_OK_KEY) === h;
   }
-  function askReviewerPassword(then) {
-    const m = $("#pwModal"), inp = $("#pwInput"), err = $("#pwErr");
-    inp.value = ""; err.hidden = true; m.hidden = false; inp.focus();
-    const done = () => { m.hidden = true; $("#pwUnlock").onclick = null; $("#pwCancel").onclick = null; inp.onkeydown = null; };
+  let closePasswordPrompt = null;
+  function showPasswordPrompt({ modal, input, error, submit, cancel, verify, onSuccess, onCancel }) {
+    closePasswordPrompt?.();
+    const controller = new AbortController();
+    const { signal } = controller;
+    let pending = false;
+    const close = () => {
+      controller.abort();
+      modal.hidden = true;
+      submit.disabled = false;
+      closePasswordPrompt = null;
+    };
+    closePasswordPrompt = close;
+    input.value = ""; error.hidden = true; modal.hidden = false; input.focus();
     const attempt = async () => {
-      if (!crypto.subtle) { err.textContent = "Password check needs a secure (https) connection."; err.hidden = false; return; }
-      if (!SCENARIO.reviewerPasswordHash) { session.set(PW_KEY, inp.value); done(); then(); return; }
-      const h = await sha256Hex(inp.value);
-      if (h === SCENARIO.reviewerPasswordHash) { session.set(PW_OK_KEY, h); session.set(PW_KEY, inp.value); done(); then(); }
-      else { err.textContent = "That password is not correct."; err.hidden = false; inp.select(); }
+      if (pending || signal.aborted) return;
+      pending = true; submit.disabled = true; error.hidden = true;
+      const password = input.value;
+      try {
+        if (!crypto.subtle) throw new Error("Password check needs a secure (https) connection.");
+        if (!await verify(password)) throw new Error("That password is not correct.");
+      } catch (failure) {
+        if (!signal.aborted) {
+          error.textContent = failure.message; error.hidden = false;
+          input.focus(); input.select();
+        }
+        return;
+      } finally {
+        pending = false;
+        if (!signal.aborted) submit.disabled = false;
+      }
+      if (signal.aborted) return;
+      close(); onSuccess(password);
     };
-    $("#pwUnlock").onclick = attempt;
-    $("#pwCancel").onclick = () => {
-      done();
-      const url = new URL(location.href); url.hash = ""; url.searchParams.delete("review");
-      history.replaceState(null, "", url);
-      if (gated) showGate();
-    };
-    inp.onkeydown = (ev) => { if (ev.key === "Enter") attempt(); if (ev.key === "Escape") $("#pwCancel").onclick(); };
+    const dismiss = () => { close(); onCancel?.(); };
+    submit.addEventListener("click", attempt, { signal });
+    cancel?.addEventListener("click", dismiss, { signal });
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); attempt(); }
+      if (event.key === "Escape" && cancel) { event.preventDefault(); dismiss(); }
+    }, { signal });
+  }
+  function askReviewerPassword(then) {
+    const hash = SCENARIO.reviewerPasswordHash;
+    showPasswordPrompt({
+      modal: $("#pwModal"), input: $("#pwInput"), error: $("#pwErr"), submit: $("#pwUnlock"), cancel: $("#pwCancel"),
+      verify: async password => !hash || await sha256Hex(password) === hash,
+      onSuccess: password => {
+        if (hash) session.set(PW_OK_KEY, hash);
+        session.set(PW_KEY, password); then();
+      },
+      onCancel: () => {
+        const url = new URL(location.href); url.hash = ""; url.searchParams.delete("review");
+        history.replaceState(null, "", url);
+        if (gated) showGate();
+      },
+    });
   }
   function showGate() {
-    const m = $("#gateModal"), inp = $("#gateInput"), err = $("#gateErr");
-    inp.value = ""; err.hidden = true; m.hidden = false; inp.focus();
-    const attempt = async () => {
-      if (!crypto.subtle) { err.textContent = "Password check needs a secure (https) connection."; err.hidden = false; return; }
-      if (await sha256Hex(inp.value) !== SCENARIO.openPasswordHash) { err.textContent = "That password is not correct."; err.hidden = false; inp.select(); return; }
-      gated = false; local.set(GATE_KEY, "1");
-      if (!state.openedAt) state.openedAt = new Date().toISOString();
-      persist(); m.hidden = true; render();
-    };
-    $("#gateStart").onclick = attempt;
-    inp.onkeydown = (ev) => { if (ev.key === "Enter") attempt(); };
+    showPasswordPrompt({
+      modal: $("#gateModal"), input: $("#gateInput"), error: $("#gateErr"), submit: $("#gateStart"),
+      verify: async password => await sha256Hex(password) === SCENARIO.openPasswordHash,
+      onSuccess: () => {
+        gated = false; local.set(GATE_KEY, "1");
+        if (!state.openedAt) state.openedAt = new Date().toISOString();
+        persist(); render();
+      },
+    });
   }
   function enterReview(code) {
     if (review.on) { if (code) reviewLoadCode(code); return; }
     if (!reviewerUnlocked()) { askReviewerPassword(() => enterReview(code)); return; }
     closePopup(false);
     review.on = true; state.readOnly = true;
-    $("#gateModal").hidden = true;
+    closePasswordPrompt?.();
     $("#reviewNavigation").hidden = false;
     $("#submitModal").hidden = true;
     document.body.classList.add("readonly");

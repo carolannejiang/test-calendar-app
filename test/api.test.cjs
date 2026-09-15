@@ -63,11 +63,15 @@ test("API rejects invalid bodies with 400 and enforces reviewer authentication",
     assert.equal((await api.request("submit", { method: "POST", body })).statusCode, 400);
   }
   assert.equal(api.records.size, 0);
-  for (const password of ["wrong", "review-passworD", ["review-password"]]) {
-    assert.equal((await api.request("submissions", { password })).statusCode, 401);
+  for (const password of ["wrong", "review-passworD", ["review-password"], null]) {
+    const rejected = await api.request("submissions", { password });
+    assert.equal(rejected.statusCode, 401);
+    assert.equal(rejected.body.error, "Wrong reviewer password");
   }
   api.environment.REVIEWER_PASSWORD = "";
-  assert.equal((await api.request("submissions")).statusCode, 503);
+  const missingConfiguration = await api.request("submissions");
+  assert.equal(missingConfiguration.statusCode, 503);
+  assert.equal(missingConfiguration.body.error, "REVIEWER_PASSWORD is not set on the server");
 });
 
 test("listing downloads one page with bounded concurrency and paginates without repeats", async () => {
