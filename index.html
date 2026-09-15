@@ -186,7 +186,7 @@ button { font: inherit; color: inherit; }
 /* ---------- calendar ---------- */
 .cal { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; user-select: none; }
 .grid {
-  display: grid; grid-template-columns: var(--gutter) repeat(7, minmax(0, 1fr));
+  position: relative; display: grid; grid-template-columns: var(--gutter) repeat(7, minmax(0, 1fr));
   min-width: 720px;
 }
 .head { position: sticky; top: 0; z-index: 5; background: var(--bg); }
@@ -218,6 +218,7 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
 }
 .daycol.past, .allday.past, .daycol.weekend { background-color: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
+.nowhair { position: absolute; left: var(--gutter); right: 0; height: 1px; background: var(--today); opacity: .5; pointer-events: none; }
 .nowline { position: absolute; left: 0; right: 0; height: 2px; background: var(--today); z-index: 4; pointer-events: none; }
 .nowline::before { content: ""; position: absolute; left: -1px; top: -4px; width: 3px; height: 10px; border-radius: 2px; background: var(--today); }
 .times .nowbadge {
@@ -803,12 +804,13 @@ button { font: inherit; color: inherit; }
   const SIM_START = (() => { const d = addDays(state.weekStart, 1); d.setHours(9, 0, 0, 0); return d; })();
   const simNow = () => new Date(SIM_START.getTime() + (Date.now() - Date.parse(state.openedAt)));
   function drawNow() {
-    for (const n of grid.querySelectorAll(".nowline, .nowbadge")) n.remove();
+    for (const n of grid.querySelectorAll(".nowline, .nowbadge, .nowhair")) n.remove();
     if (state.readOnly || !state.openedAt) return;
     const now = simNow(), min = now.getHours() * 60 + now.getMinutes();
     const col = grid.querySelector(`.daycol[data-date="${fmtDate(now)}"]`);
     if (!col || min < DAY_START || min >= DAY_END) return;
     const top = (min - DAY_START) / 60 * HOUR;
+    const hair = document.createElement("div"); hair.className = "nowhair"; hair.style.top = top + "px"; grid.prepend(hair);
     const line = document.createElement("div"); line.className = "nowline"; line.style.top = top + "px"; col.appendChild(line);
     const badge = document.createElement("div"); badge.className = "nowbadge"; badge.style.top = top + "px"; badge.textContent = fmtTime(min);
     grid.querySelector(".times").appendChild(badge);
