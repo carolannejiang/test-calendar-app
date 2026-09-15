@@ -2,7 +2,8 @@
   "name": "test-calendar-app",
   "private": true,
   "dependencies": {
-    "@vercel/blob": "^2.8.0"
+    "@vercel/blob": "^2.8.0",
+    "@vercel/speed-insights": "^2.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
