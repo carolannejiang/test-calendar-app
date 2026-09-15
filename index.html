@@ -197,13 +197,19 @@ button { font: inherit; color: inherit; }
 .daycol.past, .allday.past { background-color: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
 
 .foot-title {
-  border-top: 1px solid var(--line); padding: 4px 0 2px calc(var(--gutter) + 6px);
+  position: relative; border-top: 1px solid var(--line); padding: 6px 0 2px calc(var(--gutter) + 6px);
   font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+  cursor: ns-resize; user-select: none;
 }
+.foot-title:hover { background: var(--bg-soft); }
+.foot-title .grip {
+  position: absolute; left: 50%; top: 2px; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line);
+}
+.foot-title:hover .grip { background: var(--muted); }
 .foot { background: var(--bg); }
 .foot .cell { border-left: 1px solid var(--line); }
 .foot textarea {
-  display: block; width: 100%; height: 72px; resize: none; user-select: text; font: 12px/1.35 Roboto, "Helvetica Neue", Arial, sans-serif;
+  display: block; width: 100%; height: var(--notes-h, 72px); resize: none; user-select: text; font: 12px/1.35 Roboto, "Helvetica Neue", Arial, sans-serif;
   color: var(--text); background: transparent; border: 0; padding: 4px 6px 8px;
 }
 .foot textarea:focus { outline: none; background: var(--bg-soft); }
@@ -369,7 +375,7 @@ button { font: inherit; color: inherit; }
         <div class="head-row days" id="dayHeads"></div>
       </div>
       <div class="grid" id="grid"></div>
-      <div class="foot-title" id="dayNotesTitle">Your reasoning or notes</div>
+      <div class="foot-title" id="dayNotesTitle" title="Drag to resize"><span class="grip" aria-hidden="true"></span>Your reasoning or notes</div>
       <div class="head-row foot" id="dayNotes"></div>
     </div>
   </div>
@@ -563,6 +569,24 @@ button { font: inherit; color: inherit; }
     return n;
   }
 
+  const NOTES_H_KEY = "cal-test:notes-height";
+  (function initNotesResize() {
+    const saved = parseInt(localStorage.getItem(NOTES_H_KEY), 10);
+    if (saved) cal.style.setProperty("--notes-h", saved + "px");
+    const title = $("#dayNotesTitle"); let rs = null;
+    title.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      const ta = $("#dayNotes textarea"); if (!ta) return;
+      rs = { y0: ev.clientY, h0: ta.offsetHeight }; title.setPointerCapture(ev.pointerId); ev.preventDefault();
+    });
+    title.addEventListener("pointermove", (ev) => {
+      if (!rs) return;
+      const h = clamp(rs.h0 + (rs.y0 - ev.clientY), 40, Math.max(40, cal.clientHeight - 320));
+      cal.style.setProperty("--notes-h", h + "px");
+    });
+    const end = () => { if (!rs) return; rs = null; try { localStorage.setItem(NOTES_H_KEY, parseInt(cal.style.getPropertyValue("--notes-h"), 10)); } catch {} render(); };
+    title.addEventListener("pointerup", end); title.addEventListener("pointercancel", end);
+  })();
   function buildDayNotes() {
     const foot = $("#dayNotes"); foot.innerHTML = `<div></div>`;
     for (let i = 0; i < 7; i++) {
