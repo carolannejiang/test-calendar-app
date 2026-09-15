@@ -16,23 +16,38 @@
                    id so the reviewer view can tell moved/deleted
                    events from new ones. Times are 24h "HH:MM".
                    color: blue | green | purple | red | orange | gray
+                   The scenario name is also the storage key: change
+                   it whenever you change the events so returning
+                   browsers start fresh.
    ============================================================ */
 const SCENARIO = {
-  name: "Scheduling test v1",
+  name: "Scheduling test v2",
   today: "2026-09-14",
   timezone: "PDT",
   dayStart: "08:00",
   dayEnd: "19:00",
   instructions:
-    "Carolanne needs a 45-minute call with Max and Amr on Wednesday or Thursday, " +
-    "between 9 AM and 4 PM, without overlapping any existing meeting. " +
-    "Add the meeting, then click Submit and send us the code it gives you.",
+    "Review the calendar and complete the scheduling task you were given. " +
+    "When you are done, click Submit and send us the code it gives you.",
   events: [
-    { id: "s1", title: "Not available to meet", date: "2026-09-15", allDay: true },
-    { id: "s2", title: "carolanne solicits career advice", date: "2026-09-14", start: "12:30", end: "13:30" },
-    { id: "s3", title: "Team dinner", date: "2026-09-14", start: "17:30", end: "19:00" },
-    { id: "s4", title: "30 min with Adam (Carolanne)", date: "2026-09-16", start: "17:00", end: "17:30" },
-    { id: "s5", title: "Carolanne <> Max, Amr", date: "2026-09-17", start: "08:00", end: "08:30" }
+    { id: "mon1", title: "Policy team weekly",            date: "2026-09-14", start: "09:00", end: "10:00" },
+    { id: "mon2", title: "Lunch w/ Nate (interim COO)",   date: "2026-09-14", start: "12:00", end: "13:00" },
+    { id: "mon3", title: "1:1 Leon",                      date: "2026-09-14", start: "15:00", end: "15:30" },
+    { id: "mon4", title: "Focus block",                   date: "2026-09-14", start: "16:00", end: "18:00" },
+    { id: "tue1", title: "Policy team weekly",            date: "2026-09-15", start: "09:00", end: "10:00" },
+    { id: "tue2", title: "Lunch w/ Nate (interim COO)",   date: "2026-09-15", start: "12:00", end: "13:00" },
+    { id: "tue3", title: "1:1 Leon",                      date: "2026-09-15", start: "15:00", end: "15:30" },
+    { id: "tue4", title: "Focus block",                   date: "2026-09-15", start: "16:00", end: "18:00" },
+    { id: "wed1", title: "Leadership meeting",            date: "2026-09-16", start: "09:30", end: "11:00" },
+    { id: "wed2", title: "Board deck prep w/ Beth",       date: "2026-09-16", start: "11:00", end: "12:00" },
+    { id: "wed3", title: "Interview \u2014 Priya Raman (Anthropic), Policy Analyst", date: "2026-09-16", start: "14:00", end: "15:00" },
+    { id: "wed4", title: "Coaching w/ Ben (recurring, every other week)", date: "2026-09-16", start: "16:00", end: "17:00" },
+    { id: "thu1", title: "All hands",                     date: "2026-09-17", start: "10:00", end: "11:00" },
+    { id: "thu2", title: "Ethan",                         date: "2026-09-17", start: "10:30", end: "11:00" },
+    { id: "thu3", title: "Lunch w/ Sami, Berkeley",       date: "2026-09-17", start: "12:30", end: "13:30" },
+    { id: "thu4", title: "Talk at OrgZ, SF Mission District", date: "2026-09-17", start: "14:00", end: "15:00" },
+    { id: "fri1", title: "1:1 Lawrence (4th scheduled slot; moved 3 times)", date: "2026-09-18", start: "09:00", end: "09:30" },
+    { id: "fri2", title: "Weekly check-in w/ [you]",      date: "2026-09-18", start: "11:00", end: "11:30" }
   ]
 };
 </script>
@@ -162,7 +177,7 @@ button { font: inherit; color: inherit; }
 .allday-label { font-size: 11px; color: var(--muted); text-align: right; padding: 8px 8px 0 0; }
 .allday { min-height: 34px; padding: 4px 4px 4px 2px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
 .allday:first-of-type { border-left: 0; }
-.head-row.days { border-bottom: 1px solid var(--line-soft); }
+.head-row.days { border-bottom: 1px solid var(--line); }
 .head-row.alldays .allday-label { border-bottom: 1px solid var(--line); }
 
 .times { position: relative; }
@@ -325,7 +340,6 @@ button { font: inherit; color: inherit; }
     <div class="cal" id="cal">
       <div class="head">
         <div class="head-row days" id="dayHeads"></div>
-        <div class="head-row alldays" id="allDayRow"></div>
       </div>
       <div class="grid" id="grid"></div>
     </div>
@@ -344,7 +358,6 @@ button { font: inherit; color: inherit; }
     <span class="dash">&ndash;</span>
     <select id="popEnd" aria-label="End time"></select>
   </div>
-  <label class="chk"><input type="checkbox" id="popAllDay"> All day</label>
   <div class="actions">
     <button class="btn primary" id="popSave">Save</button>
   </div>
@@ -401,8 +414,8 @@ button { font: inherit; color: inherit; }
   const COLORS = ["blue", "green", "purple", "red", "orange", "gray"];
 
   function normalize(e) {
-    const out = { id: e.id || uid(), title: e.title || "", date: e.date, allDay: !!e.allDay,
-      start: e.allDay ? 0 : mins(e.start, 540), end: e.allDay ? 0 : mins(e.end, 600),
+    const out = { id: e.id || uid(), title: e.title || "", date: e.date, allDay: false,
+      start: mins(e.start, 540), end: mins(e.end, 600),
       color: COLORS.includes(e.color) ? e.color : "blue" };
     if (!out.allDay) {
       out.start = clamp(out.start, DAY_START, DAY_END - 15);
@@ -451,9 +464,9 @@ button { font: inherit; color: inherit; }
   const fmtDur = (sec) => { sec = Math.round(sec); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return h ? `${h}h ${pad(m)}m` : `${m}m ${pad(s2)}s`; };
 
   // ---------- DOM refs ----------
-  const cal = $("#cal"), grid = $("#grid"), dayHeads = $("#dayHeads"), allDayRow = $("#allDayRow");
+  const cal = $("#cal"), grid = $("#grid"), dayHeads = $("#dayHeads");
   const popup = $("#popup");
-  const popTitle = $("#popTitle"), popDate = $("#popDate"), popStart = $("#popStart"), popEnd = $("#popEnd"), popAllDay = $("#popAllDay");
+  const popTitle = $("#popTitle"), popDate = $("#popDate"), popStart = $("#popStart"), popEnd = $("#popEnd");
   let toastTimer;
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800); }
 
@@ -524,7 +537,6 @@ button { font: inherit; color: inherit; }
       : `${MONTHS[ws.getMonth()].slice(0, 3)} \u2013 ${MONTHS[we.getMonth()].slice(0, 3)} ${we.getFullYear()}`;
 
     dayHeads.innerHTML = `<div class="tz">${SCENARIO.timezone}</div>`;
-    allDayRow.innerHTML = `<div class="allday-label">All-day</div>`;
     grid.innerHTML = "";
     const times = document.createElement("div"); times.className = "times"; times.style.height = (HOURS * HOUR) + "px";
     for (let h = Math.ceil(DAY_START / 60) + (DAY_START % 60 === 0 ? 1 : 0); h * 60 < DAY_END; h++) {
@@ -536,10 +548,6 @@ button { font: inherit; color: inherit; }
       const d = addDays(ws, i), ds = fmtDate(d), isToday = ds === SCENARIO.today;
       const dh = document.createElement("div"); dh.className = "dayhead" + (isToday ? " today" : "");
       dh.innerHTML = `${DAYS[d.getDay()]} <span class="num">${d.getDate()}</span>`; dayHeads.appendChild(dh);
-
-      const ad = document.createElement("div"); ad.className = "allday"; ad.dataset.date = ds;
-      for (const e of evs.filter((e) => e.allDay && e.date === ds)) ad.appendChild(evNode(e));
-      allDayRow.appendChild(ad);
 
       const col = document.createElement("div"); col.className = "daycol"; col.dataset.date = ds; col.style.height = (HOURS * HOUR) + "px";
       const dayEvs = evs.filter((e) => !e.allDay && e.date === ds);
@@ -563,7 +571,6 @@ button { font: inherit; color: inherit; }
     if (!popup.hidden) { closePopup(); return; }
     const evEl = ev.target.closest(".ev");
     const col = ev.target.closest(".daycol");
-    const allday = ev.target.closest(".allday");
     if (evEl) {
       const e = evById(evEl.dataset.id); if (!e) return;
       const isResize = ev.target.classList.contains("resize");
@@ -572,8 +579,6 @@ button { font: inherit; color: inherit; }
     } else if (col) {
       Object.assign(drag, { active: true, kind: "create", x0: ev.clientX, y0: ev.clientY, moved: false,
         date: col.dataset.date, m0: snap(minuteAt(ev.clientY), 15), work: clone(state.events) });
-    } else if (allday) {
-      Object.assign(drag, { active: true, kind: "create-allday", x0: ev.clientX, y0: ev.clientY, moved: false, date: allday.dataset.date });
     } else return;
     ev.preventDefault();
   });
@@ -595,7 +600,7 @@ button { font: inherit; color: inherit; }
         const dur = drag.orig.end - drag.orig.start;
         e.start = clamp(snap(minuteAt(ev.clientY) - drag.offset, 15), DAY_START, DAY_END - dur); e.end = e.start + dur;
       }
-      render(drag.work); const n = grid.querySelector(`.ev[data-id="${e.id}"], .allday .ev[data-id="${e.id}"]`) || allDayRow.querySelector(`.ev[data-id="${e.id}"]`); if (n) n.classList.add("dragging");
+      render(drag.work); const n = grid.querySelector(`.ev[data-id="${e.id}"]`); if (n) n.classList.add("dragging");
     } else if (drag.kind === "resize") {
       const e = evById(drag.id, drag.work); if (!e) return;
       e.end = clamp(snap(minuteAt(ev.clientY), 15), e.start + 15, DAY_END);
@@ -617,9 +622,6 @@ button { font: inherit; color: inherit; }
         const e = { id: uid(), title: "", date: d.date, allDay: false, start: s, end: Math.min(s + 60, DAY_END), color: "blue", _new: true };
         state.events.push(e); render(); openPopup(e.id);
       }
-    } else if (d.kind === "create-allday") {
-      const e = { id: uid(), title: "", date: d.date, allDay: true, start: 0, end: 0, color: "blue", _new: true };
-      state.events.push(e); render(); openPopup(e.id);
     } else if (d.kind === "move" || d.kind === "resize") {
       if (d.moved) {
         const w = evById(d.id, d.work); const e = evById(d.id);
@@ -640,9 +642,8 @@ button { font: inherit; color: inherit; }
   function openPopup(id) {
     const e = evById(id); if (!e) return;
     popId = id; state.selected = id;
-    popTitle.value = e.title; popDate.value = e.date; popAllDay.checked = e.allDay;
-    popStart.value = e.allDay ? DAY_START : e.start; popEnd.value = e.allDay ? Math.min(DAY_START + 60, DAY_END) : e.end;
-    popStart.disabled = popEnd.disabled = e.allDay;
+    popTitle.value = e.title; popDate.value = e.date;
+    popStart.value = e.start; popEnd.value = e.end;
     popup.hidden = false;
     render();
     const el = cal.querySelector(`.ev[data-id="${id}"]`);
@@ -657,9 +658,8 @@ button { font: inherit; color: inherit; }
     if (popup.hidden) return;
     const e = evById(popId);
     if (e && save) {
-      e.title = popTitle.value.trim(); e.allDay = popAllDay.checked; e.date = popDate.value || e.date;
-      if (!e.allDay) { e.start = +popStart.value; e.end = +popEnd.value; if (e.end <= e.start) e.end = Math.min(DAY_END, e.start + 30); }
-      else { e.start = 0; e.end = 0; }
+      e.title = popTitle.value.trim(); e.date = popDate.value || e.date;
+      e.start = +popStart.value; e.end = +popEnd.value; if (e.end <= e.start) e.end = Math.min(DAY_END, e.start + 30);
       delete e._new;
       persist(); toast("Saved");
     } else if (e && e._new) {
@@ -673,7 +673,6 @@ button { font: inherit; color: inherit; }
     state.events = state.events.filter((x) => x.id !== popId); persist();
     popup.hidden = true; popId = null; state.selected = null; render(); toast("Event deleted");
   });
-  popAllDay.addEventListener("change", () => { popStart.disabled = popEnd.disabled = popAllDay.checked; });
   popStart.addEventListener("change", () => { if (+popEnd.value <= +popStart.value) popEnd.value = Math.min(DAY_END, +popStart.value + 60); });
   popup.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === popTitle) { ev.preventDefault(); closePopup(true); } });
   document.addEventListener("keydown", (ev) => {
