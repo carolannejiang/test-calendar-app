@@ -7,12 +7,13 @@ const root = path.join(__dirname, "..");
 const scenarioSource = fs.readFileSync(path.join(root, "scenario.js"), "utf8");
 const scenario = vm.runInNewContext(scenarioSource + "\nSCENARIO");
 const KEY = "cal-test:" + scenario.name;
+const SUBMITTED_KEY = "cal-test:submitted:" + scenario.name;
 const event = (overrides = {}) => ({ id: "mon1", title: "Meeting", date: "2026-09-14", start: 540, end: 600, allDay: false, color: "blue", notes: "", deleted: false, ...overrides });
 const payload = (overrides = {}) => ({ v: 1, c: "ABCDEF", s: scenario.name, t: "2026-09-15T10:00:00.000Z", o: null, a: 0, d: {}, e: [["mon1", "Meeting", "2026-09-14", 540, 600, 0, "blue", "", 0]], ...overrides });
 const serverPayload = (overrides = {}) => ({ ...payload(), id: "01234567-89ab-4cde-8fab-0123456789ab", receivedAt: "2026-09-15T10:00:00.000Z", ...overrides });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function app({ review = false, fetch, draft, blockedStorage = false, unlocked = true, reviewerUnlocked = true, digest } = {}) {
+function app({ review = false, fetch, draft, submitted, blockedStorage = false, unlocked = true, reviewerUnlocked = true, digest } = {}) {
   const errors = [], calls = [], alerts = [], timers = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", error => errors.push(error));
@@ -23,6 +24,7 @@ function app({ review = false, fetch, draft, blockedStorage = false, unlocked = 
   Object.defineProperty(window.crypto, "subtle", { value: digest ? { digest } : webcrypto.subtle });
   if (unlocked) window.localStorage.setItem("cal-test:opened:" + scenario.name, "1");
   if (draft) window.localStorage.setItem(KEY, JSON.stringify(draft));
+  if (submitted) window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify(submitted));
   if (reviewerUnlocked) window.sessionStorage.setItem("cal-test:reviewer-ok", scenario.reviewerPasswordHash);
   window.sessionStorage.setItem("cal-test:reviewer-pw", "test-reviewer-password");
   if (blockedStorage) Object.defineProperty(window, "localStorage", { get() { throw new Error("Storage blocked"); } });
@@ -39,4 +41,4 @@ function app({ review = false, fetch, draft, blockedStorage = false, unlocked = 
   return { window, document: window.document, errors, calls, alerts, timers, close: () => window.close() };
 }
 function response(body, status = 200) { return { ok: status >= 200 && status < 300, status, json: async () => body }; }
-module.exports = { app, response, flush, event, payload, serverPayload, scenario, KEY };
+module.exports = { app, response, flush, event, payload, serverPayload, scenario, KEY, SUBMITTED_KEY };
