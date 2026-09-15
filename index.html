@@ -618,6 +618,7 @@ button { font: inherit; color: inherit; }
       const cell = document.createElement("div"); cell.className = "cell";
       const ta = document.createElement("textarea"); ta.id = "dn-" + ds; ta.dataset.date = ds;
       ta.setAttribute("aria-label", `Your reasoning or notes for ${fmtLongDate(ds)}`);
+      attachBullets(ta);
       ta.addEventListener("input", () => { state.dayNotes[ds] = ta.value; persist(); });
       const ex = document.createElement("button"); ex.className = "expand"; ex.type = "button"; ex.title = "Expand"; ex.setAttribute("aria-label", `Expand notes for ${fmtLongDate(ds)}`);
       ex.innerHTML = `<svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>`;
@@ -625,7 +626,42 @@ button { font: inherit; color: inherit; }
       cell.appendChild(ta); cell.appendChild(ex); foot.appendChild(cell);
     }
   }
+  // Bullet lists in notes: typing "- " or "* " at the start of a line becomes a bullet,
+  // Enter continues the list, Enter on an empty bullet ends it.
+  const BULLET = "\u2022 ";
+  function attachBullets(ta) {
+    const lineStart = (v, pos) => v.lastIndexOf("\n", pos - 1) + 1;
+    ta.addEventListener("input", () => {
+      const v = ta.value, pos = ta.selectionStart, ls = lineStart(v, pos);
+      let le = v.indexOf("\n", pos); if (le < 0) le = v.length;
+      const m = v.slice(ls, le).match(/^(\s*)[-*]\s(.*)$/);
+      if (m) {
+        const prefixLen = m[1].length + 2;
+        ta.value = v.slice(0, ls) + m[1] + BULLET + m[2] + v.slice(le);
+        const np = pos - prefixLen + m[1].length + BULLET.length;
+        ta.selectionStart = ta.selectionEnd = Math.max(ls + m[1].length + BULLET.length, np);
+      }
+    });
+    ta.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing) return;
+      const v = ta.value, pos = ta.selectionStart, ls = lineStart(v, pos);
+      let le = v.indexOf("\n", pos); if (le < 0) le = v.length;
+      const m = v.slice(ls, le).match(/^(\s*)\u2022 (.*)$/);
+      if (!m) return;
+      ev.preventDefault();
+      if (m[2].trim() === "" && pos >= le) {
+        ta.value = v.slice(0, ls) + v.slice(le);
+        ta.selectionStart = ta.selectionEnd = ls;
+      } else {
+        const ins = "\n" + m[1] + BULLET;
+        ta.value = v.slice(0, pos) + ins + v.slice(ta.selectionEnd);
+        ta.selectionStart = ta.selectionEnd = pos + ins.length;
+      }
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
   let notesModalDate = null;
+  attachBullets($("#notesModalText"));
   function openNotesModal(ds) {
     notesModalDate = ds;
     $("#notesModalTitle").textContent = `Your reasoning or notes \u00b7 ${fmtLongDate(ds)}`;
