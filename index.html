@@ -218,9 +218,10 @@ button { font: inherit; color: inherit; }
 .foot-title {
   position: relative; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px 0 4px calc(var(--gutter) + 6px);
   font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
-  cursor: ns-resize; user-select: none;
+  cursor: ns-resize; user-select: none; touch-action: none;
 }
-.foot-title:hover { background: var(--bg-soft); }
+.foot-title:hover, .cal.notes-resizing .foot-title { background: var(--bg-soft); }
+.cal.notes-resizing, .cal.notes-resizing * { cursor: ns-resize !important; }
 .foot-title .grip {
   position: absolute; left: 50%; top: 2px; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line);
 }
@@ -654,17 +655,24 @@ button { font: inherit; color: inherit; }
     const saved = parseInt(localStorage.getItem(NOTES_H_KEY), 10);
     if (saved) cal.style.setProperty("--notes-h", saved + "px");
     const title = $("#dayNotesTitle"); let rs = null;
+    let raf = 0, pendingH = 0;
+    const applyH = () => { raf = 0; cal.style.setProperty("--notes-h", pendingH + "px"); if (fitHours()) renderOnce(); };
     title.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
       const ta = $("#dayNotes textarea"); if (!ta) return;
       rs = { y0: ev.clientY, h0: ta.offsetHeight }; title.setPointerCapture(ev.pointerId); ev.preventDefault();
+      cal.classList.add("notes-resizing");
     });
     title.addEventListener("pointermove", (ev) => {
       if (!rs) return;
-      const h = clamp(rs.h0 + (rs.y0 - ev.clientY), 40, Math.max(40, cal.clientHeight - 320));
-      cal.style.setProperty("--notes-h", h + "px");
+      pendingH = clamp(rs.h0 + (rs.y0 - ev.clientY), 40, Math.max(40, cal.clientHeight - 320));
+      if (!raf) raf = requestAnimationFrame(applyH);
     });
-    const end = () => { if (!rs) return; rs = null; try { localStorage.setItem(NOTES_H_KEY, parseInt(cal.style.getPropertyValue("--notes-h"), 10)); } catch {} render(); };
+    const end = () => {
+      if (!rs) return; rs = null; cal.classList.remove("notes-resizing");
+      if (raf) { cancelAnimationFrame(raf); applyH(); }
+      try { localStorage.setItem(NOTES_H_KEY, parseInt(cal.style.getPropertyValue("--notes-h"), 10)); } catch {} render();
+    };
     title.addEventListener("pointerup", end); title.addEventListener("pointercancel", end);
   })();
   function buildDayNotes() {
