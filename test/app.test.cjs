@@ -248,3 +248,23 @@ test("successful gate unlock removes its click and keyboard handlers", async t =
   assert.equal(checks, 1);
   assert.equal(ui.errors.length, 0);
 });
+
+test("candidate search filters the loaded submission list without losing the selection", async t => {
+  const submissions = [serverPayload(), serverPayload({ id: "11111111-1111-4111-8111-111111111111", c: "UVWXYZ", receivedAt: "2026-09-16T00:00:00Z" })];
+  const ui = app({ review: true, fetch: async () => response({ ok: true, submissions, cursor: null }) }); t.after(ui.close); await flush();
+  const search = ui.document.querySelector("#subSearch");
+  ui.document.querySelectorAll("#subList .submission")[1].click();
+  search.value = "abc"; search.dispatchEvent(new ui.window.Event("input"));
+  assert.deepEqual([...ui.document.querySelectorAll("#subList b")].map(b => b.textContent), ["ABCDEF"]);
+  assert.equal(ui.document.querySelector("#subEmpty").hidden, true);
+  assert.match(ui.document.querySelector("#reviewBanner").textContent, /Candidate ABCDEF/);
+  search.value = "zzz"; search.dispatchEvent(new ui.window.Event("input"));
+  assert.equal(ui.document.querySelectorAll("#subList li").length, 0);
+  assert.equal(ui.document.querySelector("#subEmpty").hidden, false);
+  ui.document.querySelector("#serverRefresh").click(); await flush();
+  assert.equal(ui.document.querySelectorAll("#subList li").length, 0);
+  search.value = ""; search.dispatchEvent(new ui.window.Event("input"));
+  assert.equal(ui.document.querySelectorAll("#subList li").length, 2);
+  assert.equal(ui.document.querySelector("#subList button.active b").textContent, "ABCDEF");
+  assert.equal(ui.errors.length, 0);
+});
