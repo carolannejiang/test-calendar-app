@@ -213,7 +213,12 @@ button { font: inherit; color: inherit; }
   background-size: 100% var(--hour);
   cursor: pointer;
 }
-.daycol.past, .allday.past { background-color: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
+.daycol.past, .allday.past, .daycol.weekend { background-color: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
+.nowline { position: absolute; left: 0; right: 0; height: 2px; background: var(--today); z-index: 4; pointer-events: none; }
+.nowline::before { content: ""; position: absolute; left: -1px; top: -4px; width: 3px; height: 10px; border-radius: 2px; background: var(--today); }
+.times .nowbadge {
+  right: 4px; padding: 1px 6px; border-radius: 6px; background: var(--today); color: var(--today-ink); font-weight: 500; z-index: 4; pointer-events: none;
+}
 
 .foot-title {
   position: relative; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px 0 4px calc(var(--gutter) + 6px);
@@ -764,17 +769,35 @@ button { font: inherit; color: inherit; }
     grid.appendChild(times);
 
     for (let i = 0; i < 7; i++) {
-      const d = addDays(ws, i), ds = fmtDate(d), isToday = ds === SCENARIO.today;
+      const d = addDays(ws, i), ds = fmtDate(d), isToday = ds === SCENARIO.today, isWeekend = d.getDay() === 0 || d.getDay() === 6;
       const dh = document.createElement("div"); dh.className = "dayhead" + (isToday ? " today" : "");
       dh.innerHTML = `${DAYS[d.getDay()]} <span class="num">${d.getDate()}</span>`; dayHeads.appendChild(dh);
 
-      const col = document.createElement("div"); col.className = "daycol"; col.dataset.date = ds; col.style.height = (HOURS * HOUR) + "px";
+      const col = document.createElement("div"); col.className = "daycol" + (isWeekend ? " weekend" : ""); col.dataset.date = ds; col.style.height = (HOURS * HOUR) + "px";
       const dayEvs = evs.filter((e) => !e.allDay && e.date === ds);
       layoutColumns(dayEvs);
       for (const e of dayEvs) col.appendChild(evNode(e, e.id === "__ghost"));
       grid.appendChild(col);
     }
+    drawNow();
   }
+
+  // Simulated clock: it is 9:00 AM on the Monday of the scenario week when the candidate
+  // first opens the app, and runs forward in real time from there.
+  const SIM_START = (() => { const d = addDays(state.weekStart, 1); d.setHours(9, 0, 0, 0); return d; })();
+  const simNow = () => new Date(SIM_START.getTime() + (Date.now() - Date.parse(state.openedAt)));
+  function drawNow() {
+    for (const n of grid.querySelectorAll(".nowline, .nowbadge")) n.remove();
+    if (state.readOnly) return;
+    const now = simNow(), min = now.getHours() * 60 + now.getMinutes();
+    const col = grid.querySelector(`.daycol[data-date="${fmtDate(now)}"]`);
+    if (!col || min < DAY_START || min >= DAY_END) return;
+    const top = (min - DAY_START) / 60 * HOUR;
+    const line = document.createElement("div"); line.className = "nowline"; line.style.top = top + "px"; col.appendChild(line);
+    const badge = document.createElement("div"); badge.className = "nowbadge"; badge.style.top = top + "px"; badge.textContent = fmtTime(min);
+    grid.querySelector(".times").appendChild(badge);
+  }
+  setInterval(drawNow, 30000);
 
   // ---------- pointer interactions ----------
   const drag = { active: false };
