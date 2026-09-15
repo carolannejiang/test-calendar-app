@@ -8,6 +8,8 @@
    SCENARIO — edit this block between hiring rounds.
    - today:        the date the calendar opens on (the "today" badge).
    - timezone:     label shown in the time gutter. Display only.
+   - dayStart/dayEnd: the visible hours. The grid is scaled so this
+                   range fills the window; nothing outside it is shown.
    - instructions: shown to the candidate behind the "Instructions"
                    button. Set to "" to hide the button.
    - events:       the starting calendar. Give every event a stable
@@ -19,6 +21,8 @@ const SCENARIO = {
   name: "Scheduling test v1",
   today: "2026-09-14",
   timezone: "PDT",
+  dayStart: "08:00",
+  dayEnd: "19:00",
   instructions:
     "Carolanne needs a 45-minute call with Max and Amr on Wednesday or Thursday, " +
     "between 9 AM and 4 PM, without overlapping any existing meeting. " +
@@ -26,7 +30,7 @@ const SCENARIO = {
   events: [
     { id: "s1", title: "Not available to meet", date: "2026-09-15", allDay: true },
     { id: "s2", title: "carolanne solicits career advice", date: "2026-09-14", start: "12:30", end: "13:30" },
-    { id: "s3", title: "Team dinner", date: "2026-09-14", start: "19:00", end: "20:30" },
+    { id: "s3", title: "Team dinner", date: "2026-09-14", start: "17:30", end: "19:00" },
     { id: "s4", title: "30 min with Adam (Carolanne)", date: "2026-09-16", start: "17:00", end: "17:30" },
     { id: "s5", title: "Carolanne <> Max, Amr", date: "2026-09-17", start: "08:00", end: "08:30" }
   ]
@@ -161,13 +165,13 @@ button { font: inherit; color: inherit; }
 .head-row.days { border-bottom: 1px solid var(--line-soft); }
 .head-row.alldays .allday-label { border-bottom: 1px solid var(--line); }
 
-.times { position: relative; height: calc(var(--hour) * 24); }
+.times { position: relative; }
 .times div {
   position: absolute; right: 8px; transform: translateY(-50%);
   font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
 }
 .daycol {
-  position: relative; height: calc(var(--hour) * 24);
+  position: relative;
   border-left: 1px solid var(--line);
   background-image: linear-gradient(var(--line-soft) 1px, transparent 1px);
   background-size: 100% var(--hour);
@@ -381,7 +385,9 @@ button { font: inherit; color: inherit; }
   const mins = (v, dflt) => typeof v === "number" ? v : (typeof v === "string" && v.includes(":") ? hm(v) : dflt);
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const HOUR = 48;
+  let HOUR = 48;
+  const DAY_START = hm(SCENARIO.dayStart || "00:00"), DAY_END = hm(SCENARIO.dayEnd || "24:00");
+  const HOURS = (DAY_END - DAY_START) / 60;
   const fmtTime = (m) => {
     let h = Math.floor(m / 60), mm = m % 60; const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
     return `${h}:${pad(mm)} ${ap}`;
@@ -398,7 +404,10 @@ button { font: inherit; color: inherit; }
     const out = { id: e.id || uid(), title: e.title || "", date: e.date, allDay: !!e.allDay,
       start: e.allDay ? 0 : mins(e.start, 540), end: e.allDay ? 0 : mins(e.end, 600),
       color: COLORS.includes(e.color) ? e.color : "blue" };
-    if (!out.allDay && out.end <= out.start) out.end = Math.min(1440, out.start + 30);
+    if (!out.allDay) {
+      out.start = clamp(out.start, DAY_START, DAY_END - 15);
+      out.end = clamp(out.end, out.start + 15, DAY_END);
+    }
     return out;
   }
   const clone = (evs) => evs.map((e) => ({ ...e }));
@@ -448,12 +457,21 @@ button { font: inherit; color: inherit; }
   let toastTimer;
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800); }
 
-  for (let m = 0; m < 1440; m += 15) {
-    popStart.add(new Option(fmtTime(m), m)); popEnd.add(new Option(fmtTime(m), m));
+  for (let m = DAY_START; m < DAY_END; m += 15) {
+    popStart.add(new Option(fmtTime(m), m)); if (m > DAY_START) popEnd.add(new Option(fmtTime(m), m));
   }
-  popEnd.add(new Option(fmtTime(1439).replace("11:59", "12:00"), 1440));
+  popEnd.add(new Option(fmtTime(DAY_END), DAY_END));
 
   // ---------- rendering ----------
+  function fitHours() {
+    const head = cal.querySelector(".head");
+    const avail = cal.clientHeight - (head ? head.offsetHeight : 0);
+    const next = Math.max(36, Math.floor(avail / HOURS));
+    if (next === HOUR) return false;
+    HOUR = next; cal.style.setProperty("--hour", HOUR + "px"); return true;
+  }
+  window.addEventListener("resize", () => render());
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => render());
   function layoutColumns(evs) {
     evs.sort((a, b) => a.start - b.start || b.end - a.end);
     let cluster = null, clusterEnd = -1; const clusters = [];
@@ -483,7 +501,7 @@ button { font: inherit; color: inherit; }
       n.title = title;
     } else {
       const dur = e.end - e.start;
-      n.style.top = (e.start / 60 * HOUR) + "px";
+      n.style.top = ((e.start - DAY_START) / 60 * HOUR) + "px";
       n.style.height = Math.max(dur / 60 * HOUR - 1, 12) + "px";
       if (dur < 30) n.classList.add("tiny"); else if (dur < 50) n.classList.add("short");
       if (e._cols > 1) { const w = 100 / e._cols; n.style.left = `calc(${w * e._col}% + 2px)`; n.style.width = `calc(${w}% - 5px)`; n.style.right = "auto"; }
@@ -495,6 +513,10 @@ button { font: inherit; color: inherit; }
   }
 
   function render(overrideEvents) {
+    renderOnce(overrideEvents);
+    if (fitHours()) renderOnce(overrideEvents);
+  }
+  function renderOnce(overrideEvents) {
     const evs = overrideEvents || state.events;
     const ws = state.weekStart, we = addDays(ws, 6);
     $("#monthTitle").textContent = ws.getMonth() === we.getMonth()
@@ -504,8 +526,10 @@ button { font: inherit; color: inherit; }
     dayHeads.innerHTML = `<div class="tz">${SCENARIO.timezone}</div>`;
     allDayRow.innerHTML = `<div class="allday-label">All-day</div>`;
     grid.innerHTML = "";
-    const times = document.createElement("div"); times.className = "times";
-    for (let h = 1; h < 24; h++) { const d = document.createElement("div"); d.style.top = (h * HOUR) + "px"; d.textContent = fmtHour(h); times.appendChild(d); }
+    const times = document.createElement("div"); times.className = "times"; times.style.height = (HOURS * HOUR) + "px";
+    for (let h = Math.ceil(DAY_START / 60) + (DAY_START % 60 === 0 ? 1 : 0); h * 60 < DAY_END; h++) {
+      const d = document.createElement("div"); d.style.top = ((h * 60 - DAY_START) / 60 * HOUR) + "px"; d.textContent = fmtHour(h); times.appendChild(d);
+    }
     grid.appendChild(times);
 
     for (let i = 0; i < 7; i++) {
@@ -517,7 +541,7 @@ button { font: inherit; color: inherit; }
       for (const e of evs.filter((e) => e.allDay && e.date === ds)) ad.appendChild(evNode(e));
       allDayRow.appendChild(ad);
 
-      const col = document.createElement("div"); col.className = "daycol"; col.dataset.date = ds;
+      const col = document.createElement("div"); col.className = "daycol"; col.dataset.date = ds; col.style.height = (HOURS * HOUR) + "px";
       const dayEvs = evs.filter((e) => !e.allDay && e.date === ds);
       layoutColumns(dayEvs);
       for (const e of dayEvs) col.appendChild(evNode(e, e.id === "__ghost"));
@@ -531,7 +555,7 @@ button { font: inherit; color: inherit; }
     for (const c of grid.querySelectorAll(".daycol")) { const r = c.getBoundingClientRect(); if (x >= r.left && x < r.right) return c; }
     return null;
   }
-  function minuteAt(y) { const r = grid.querySelector(".daycol").getBoundingClientRect(); return clamp((y - r.top) / HOUR * 60, 0, 1440); }
+  function minuteAt(y) { const r = grid.querySelector(".daycol").getBoundingClientRect(); return clamp(DAY_START + (y - r.top) / HOUR * 60, DAY_START, DAY_END); }
   function evById(id, list) { return (list || state.events).find((e) => e.id === id); }
 
   cal.addEventListener("pointerdown", (ev) => {
@@ -562,19 +586,19 @@ button { font: inherit; color: inherit; }
     if (drag.kind === "create") {
       const m = snap(minuteAt(ev.clientY), 15);
       const a = Math.min(drag.m0, m), b = Math.max(drag.m0, m);
-      const g = { id: "__ghost", title: "(No title)", date: drag.date, allDay: false, start: clamp(a, 0, 1425), end: clamp(Math.max(b, a + 15), 15, 1440), color: "blue" };
+      const g = { id: "__ghost", title: "(No title)", date: drag.date, allDay: false, start: clamp(a, DAY_START, DAY_END - 15), end: clamp(Math.max(b, a + 15), DAY_START + 15, DAY_END), color: "blue" };
       render([...drag.work, g]);
     } else if (drag.kind === "move") {
       const e = evById(drag.id, drag.work); if (!e) return;
       if (col) e.date = col.dataset.date;
       if (!e.allDay) {
         const dur = drag.orig.end - drag.orig.start;
-        e.start = clamp(snap(minuteAt(ev.clientY) - drag.offset, 15), 0, 1440 - dur); e.end = e.start + dur;
+        e.start = clamp(snap(minuteAt(ev.clientY) - drag.offset, 15), DAY_START, DAY_END - dur); e.end = e.start + dur;
       }
       render(drag.work); const n = grid.querySelector(`.ev[data-id="${e.id}"], .allday .ev[data-id="${e.id}"]`) || allDayRow.querySelector(`.ev[data-id="${e.id}"]`); if (n) n.classList.add("dragging");
     } else if (drag.kind === "resize") {
       const e = evById(drag.id, drag.work); if (!e) return;
-      e.end = clamp(snap(minuteAt(ev.clientY), 15), e.start + 15, 1440);
+      e.end = clamp(snap(minuteAt(ev.clientY), 15), e.start + 15, DAY_END);
       render(drag.work);
     }
   });
@@ -586,11 +610,11 @@ button { font: inherit; color: inherit; }
       if (d.moved) {
         const m = snap(minuteAt(ev.clientY), 15);
         const a = Math.min(d.m0, m), b = Math.max(d.m0, m);
-        const e = { id: uid(), title: "", date: d.date, allDay: false, start: clamp(a, 0, 1425), end: clamp(Math.max(b, a + 15), 15, 1440), color: "blue", _new: true };
+        const e = { id: uid(), title: "", date: d.date, allDay: false, start: clamp(a, DAY_START, DAY_END - 15), end: clamp(Math.max(b, a + 15), DAY_START + 15, DAY_END), color: "blue", _new: true };
         state.events.push(e); render(); openPopup(e.id);
       } else {
-        const s = Math.floor(d.m0 / 30) * 30;
-        const e = { id: uid(), title: "", date: d.date, allDay: false, start: clamp(s, 0, 1380), end: clamp(s + 60, 60, 1440), color: "blue", _new: true };
+        const s = clamp(Math.floor(d.m0 / 30) * 30, DAY_START, DAY_END - 30);
+        const e = { id: uid(), title: "", date: d.date, allDay: false, start: s, end: Math.min(s + 60, DAY_END), color: "blue", _new: true };
         state.events.push(e); render(); openPopup(e.id);
       }
     } else if (d.kind === "create-allday") {
@@ -617,7 +641,7 @@ button { font: inherit; color: inherit; }
     const e = evById(id); if (!e) return;
     popId = id; state.selected = id;
     popTitle.value = e.title; popDate.value = e.date; popAllDay.checked = e.allDay;
-    popStart.value = e.allDay ? 540 : e.start; popEnd.value = e.allDay ? 600 : e.end;
+    popStart.value = e.allDay ? DAY_START : e.start; popEnd.value = e.allDay ? Math.min(DAY_START + 60, DAY_END) : e.end;
     popStart.disabled = popEnd.disabled = e.allDay;
     popup.hidden = false;
     render();
@@ -634,7 +658,7 @@ button { font: inherit; color: inherit; }
     const e = evById(popId);
     if (e && save) {
       e.title = popTitle.value.trim(); e.allDay = popAllDay.checked; e.date = popDate.value || e.date;
-      if (!e.allDay) { e.start = +popStart.value; e.end = +popEnd.value; if (e.end <= e.start) e.end = Math.min(1440, e.start + 30); }
+      if (!e.allDay) { e.start = +popStart.value; e.end = +popEnd.value; if (e.end <= e.start) e.end = Math.min(DAY_END, e.start + 30); }
       else { e.start = 0; e.end = 0; }
       delete e._new;
       persist(); toast("Saved");
@@ -650,7 +674,7 @@ button { font: inherit; color: inherit; }
     popup.hidden = true; popId = null; state.selected = null; render(); toast("Event deleted");
   });
   popAllDay.addEventListener("change", () => { popStart.disabled = popEnd.disabled = popAllDay.checked; });
-  popStart.addEventListener("change", () => { if (+popEnd.value <= +popStart.value) popEnd.value = Math.min(1440, +popStart.value + 60); });
+  popStart.addEventListener("change", () => { if (+popEnd.value <= +popStart.value) popEnd.value = Math.min(DAY_END, +popStart.value + 60); });
   popup.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === popTitle) { ev.preventDefault(); closePopup(true); } });
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
@@ -802,7 +826,5 @@ button { font: inherit; color: inherit; }
   if (hashCode) { enterReview(hashCode[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }
   else if (location.hash === "#review") enterReview();
 
-  // scroll to a sensible hour on first paint
-  cal.scrollTop = 7 * HOUR - 8;
 })();
 </script>
