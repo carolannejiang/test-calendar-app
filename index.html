@@ -196,6 +196,17 @@ button { font: inherit; color: inherit; }
 }
 .daycol.past, .allday.past { background-color: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
 
+.foot { border-top: 1px solid var(--line); background: var(--bg); }
+.foot .foot-label { font-size: 11px; color: var(--muted); text-align: right; padding: 8px 8px 0 0; }
+.foot .cell { border-left: 1px solid var(--line); padding: 6px 6px 8px; }
+.foot textarea {
+  width: 100%; height: 72px; resize: none; user-select: text; font: 12px/1.35 Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text); background: var(--bg-soft); border: 1px solid transparent; border-radius: 6px; padding: 6px;
+}
+.foot textarea::placeholder { color: var(--muted); }
+.foot textarea:focus { border-color: var(--accent); outline: none; background: var(--bg); }
+.foot textarea:disabled { color: var(--text-2); opacity: 1; }
+
 /* ---------- events ---------- */
 .ev {
   position: absolute; left: 2px; right: 4px; overflow: hidden;
@@ -356,6 +367,7 @@ button { font: inherit; color: inherit; }
         <div class="head-row days" id="dayHeads"></div>
       </div>
       <div class="grid" id="grid"></div>
+      <div class="head-row foot" id="dayNotes"></div>
     </div>
   </div>
 </div>
@@ -465,10 +477,11 @@ button { font: inherit; color: inherit; }
     weekStart: (() => { const t = toDate(SCENARIO.today); return addDays(t, -t.getDay()); })(),
     readOnly: false,
     selected: null,
+    dayNotes: (saved && saved.dayNotes) || {},
     openedAt: (saved && saved.openedAt) || new Date().toISOString(),
     activeSec: (saved && saved.activeSec) || 0,
   };
-  function persist() { if (!state.readOnly) store(KEY, { candidate: state.candidate, events: state.events, openedAt: state.openedAt, activeSec: state.activeSec }); }
+  function persist() { if (!state.readOnly) store(KEY, { candidate: state.candidate, events: state.events, dayNotes: state.dayNotes, openedAt: state.openedAt, activeSec: state.activeSec }); }
   persist();
 
   // time on page: counts seconds while the tab is visible, saved every few seconds
@@ -495,7 +508,8 @@ button { font: inherit; color: inherit; }
   // ---------- rendering ----------
   function fitHours() {
     const head = cal.querySelector(".head");
-    const avail = cal.clientHeight - (head ? head.offsetHeight : 0);
+    const foot = $("#dayNotes");
+    const avail = cal.clientHeight - (head ? head.offsetHeight : 0) - (foot ? foot.offsetHeight : 0);
     const next = Math.max(36, Math.floor(avail / HOURS));
     if (next === HOUR) return false;
     HOUR = next; cal.style.setProperty("--hour", HOUR + "px"); return true;
@@ -546,7 +560,26 @@ button { font: inherit; color: inherit; }
     return n;
   }
 
+  function buildDayNotes() {
+    const foot = $("#dayNotes"); foot.innerHTML = `<div class="foot-label">Notes</div>`;
+    for (let i = 0; i < 7; i++) {
+      const ds = fmtDate(addDays(state.weekStart, i));
+      const cell = document.createElement("div"); cell.className = "cell";
+      const ta = document.createElement("textarea"); ta.id = "dn-" + ds; ta.dataset.date = ds;
+      ta.placeholder = "Your reasoning or notes"; ta.setAttribute("aria-label", `Notes for ${fmtLongDate(ds)}`);
+      ta.addEventListener("input", () => { state.dayNotes[ds] = ta.value; persist(); });
+      cell.appendChild(ta); foot.appendChild(cell);
+    }
+  }
+  function fillDayNotes() {
+    for (const ta of $("#dayNotes").querySelectorAll("textarea")) {
+      const v = state.dayNotes[ta.dataset.date] || "";
+      if (ta.value !== v) ta.value = v;
+      ta.disabled = state.readOnly;
+    }
+  }
   function render(overrideEvents) {
+    fillDayNotes();
     renderOnce(overrideEvents);
     if (fitHours()) renderOnce(overrideEvents);
   }
@@ -734,7 +767,8 @@ button { font: inherit; color: inherit; }
     return p;
   }
   function serialize() {
-    return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(), o: state.openedAt, a: state.activeSec,
+    const d = {}; for (const [k, v] of Object.entries(state.dayNotes)) if (v && v.trim()) d[k] = v.trim();
+    return { v: 1, c: state.candidate, s: SCENARIO.name, t: new Date().toISOString(), o: state.openedAt, a: state.activeSec, d,
       e: state.events.map((e) => [e.id, e.title, e.date, e.start, e.end, e.allDay ? 1 : 0, e.color, e.notes || ""]) };
   }
   async function copy(text, label) {
@@ -773,6 +807,13 @@ button { font: inherit; color: inherit; }
     if (!evs) { c.innerHTML = ""; return; }
     const list = describeChanges(evs);
     c.innerHTML = `<h3>${label}</h3>` + (list.length ? "<ul></ul>" : `<div class="none">No changes from the starting calendar.</div>`);
+    const dn = Object.entries(state.dayNotes || {}).filter(([, v]) => v && v.trim()).sort();
+    if (dn.length) {
+      const h = document.createElement("h3"); h.textContent = "Day notes"; c.appendChild(h);
+      const ul2 = document.createElement("ul");
+      for (const [k, v] of dn) { const li = document.createElement("li"); li.innerHTML = `<b></b><br><span class="from"></span>`; li.querySelector("b").textContent = fmtLongDate(k); li.querySelector(".from").textContent = v; ul2.appendChild(li); }
+      c.appendChild(ul2);
+    }
     const ul = c.querySelector("ul");
     for (const ch of list) {
       const li = document.createElement("li"); li.className = ch.kind;
@@ -784,11 +825,12 @@ button { font: inherit; color: inherit; }
   const review = { on: false, subs: load(REVIEW_KEY) || [], active: -1 };
   const banner = $("#reviewBanner");
   function reviewShowSeed() {
-    review.active = -1; state.events = clone(SEED); render(); reviewRenderList();
+    review.active = -1; state.events = clone(SEED); state.dayNotes = {}; render(); reviewRenderList();
     banner.hidden = false; banner.textContent = "Reviewer view \u00b7 Starting calendar"; renderChanges(null);
   }
   function reviewShowSub(i) {
     review.active = i; const p = review.subs[i];
+    state.dayNotes = p.d || {};
     const seedById = Object.fromEntries(SEED.map((x) => [x.id, x]));
     state.events = p.e.map((a) => ({ id: a[0], title: a[1], date: a[2], start: a[3], end: a[4], allDay: !!a[5], color: a[6] || "blue", notes: a[7] || "",
       location: (seedById[a[0]] || {}).location || "", detail: (seedById[a[0]] || {}).detail || "" }));
@@ -832,6 +874,7 @@ button { font: inherit; color: inherit; }
     banner.hidden = true;
     const sv = load(KEY);
     state.events = sv && Array.isArray(sv.events) ? sv.events.map(normalize) : clone(SEED);
+    state.dayNotes = (sv && sv.dayNotes) || {};
     const t = toDate(SCENARIO.today); state.weekStart = addDays(t, -t.getDay());
     render();
   }
@@ -845,7 +888,7 @@ button { font: inherit; color: inherit; }
 
 
   $("#candidateId").textContent = state.candidate;
-  render();
+  buildDayNotes(); render();
   const hashCode = location.hash.match(/^#review=(.+)$/);
   if (hashCode) { enterReview(hashCode[1]); history.replaceState(null, "", location.href.split("#")[0] + "#review"); }
   else if (location.hash === "#review") enterReview();
