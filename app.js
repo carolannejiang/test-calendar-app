@@ -105,7 +105,7 @@ function startApp(SCENARIO) {
   function persist() { if (!state.readOnly && !build.on) store(KEY, { candidate: state.candidate, events: state.events, dayNotes: state.dayNotes, openedAt: state.openedAt, activeSec: state.activeSec }); }
   persist();
 
-  // time on page: counts seconds while the tab is visible, saved every few seconds
+  // time on test: wall-clock seconds since the test was first opened, saved every few seconds
   const fmtClock = (sec) => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s2 = sec % 60; return h ? `${h}:${pad(m)}:${pad(s2)}` : `${m}:${pad(s2)}`; };
   const drawTimer = () => { $("#timerText").textContent = fmtClock(state.activeSec); };
   drawTimer();
@@ -115,8 +115,10 @@ function startApp(SCENARIO) {
   applyTimerVisibility();
   $("#timerToggle").addEventListener("click", () => { timerHidden = !timerHidden; local.set(TIMER_KEY, timerHidden ? "1" : "0"); applyTimerVisibility(); });
   setInterval(() => {
-    if (state.readOnly || build.on || gated || document.visibilityState !== "visible") return;
-    state.activeSec++; drawTimer(); if (state.activeSec % 5 === 0) persist();
+    if (state.readOnly || build.on || gated || !state.openedAt) return;
+    const sec = Math.max(state.activeSec, Math.floor((Date.now() - Date.parse(state.openedAt)) / 1000));
+    if (sec === state.activeSec) return;
+    state.activeSec = sec; drawTimer(); if (state.activeSec % 5 === 0) persist();
   }, 1000);
   document.addEventListener("visibilitychange", () => persist());
   window.addEventListener("pagehide", () => persist());
@@ -588,7 +590,7 @@ function startApp(SCENARIO) {
     render(); reviewRenderList();
     banner.hidden = false;
     const elapsed = p.o ? (Date.parse(p.t) - Date.parse(p.o)) / 1000 : null;
-    const timing = p.o ? ` · reported active time ${fmtDur(p.a)}` + (elapsed >= 0 ? `, ${fmtDur(elapsed)} from first open to submit` : "") : "";
+    const timing = p.o ? ` · reported time ${fmtDur(p.a)}` + (elapsed >= 0 ? `, ${fmtDur(elapsed)} from first open to submit` : "") : "";
     const dateLabel = p.receivedAt ? "received" : "submitted";
     banner.textContent = `Reviewer view · Candidate ${p.c} · ${dateLabel} ${new Date(p.receivedAt || p.t).toLocaleString()}${timing}` +
       (state.compareSeed ? "" : ` · scenario "${p.s}"`);
