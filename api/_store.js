@@ -1,41 +1,76 @@
-// Shared helpers for the serverless functions. Files starting with "_" are not routed.
-// Storage: Vercel Blob (private access). Creating a Blob store on the project sets
-// BLOB_READ_WRITE_TOKEN automatically; the SDK reads it from the environment.
-
+// Private Blob storage. The SDK reads BLOB_READ_WRITE_TOKEN from the environment.
+const { createHash, timingSafeEqual } = require("node:crypto");
 const { put, get, list, del } = require("@vercel/blob");
+const { parseSubmission, ValidationError, isSubmissionId } = require("../shared/submission");
 const PREFIX = "submissions/";
+const PAGE_SIZE = 50;
+const READ_CONCURRENCY = 8;
 
 function configured() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    const e = new Error("Storage is not configured. Create a Blob store on this Vercel project.");
-    e.status = 503; throw e;
+    const error = new Error("Storage is not configured. Create a Blob store on this Vercel project.");
+    error.status = 503;
+    throw error;
   }
 }
 
-async function saveSubmission(id, obj) {
+async function saveSubmission(id, payload) {
   configured();
-  await put(PREFIX + id + ".json", JSON.stringify(obj), {
-    access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: true,
+  await put(PREFIX + id + ".json", JSON.stringify(payload), {
+    access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: false,
   });
 }
 
 async function readSubmission(pathname) {
-  const r = await get(pathname, { access: "private", useCache: false });
-  if (!r || r.statusCode !== 200) return null;
-  const text = await new Response(r.stream).text();
-  try { return JSON.parse(text); } catch { return null; }
+  const response = await get(pathname, { access: "private", useCache: false });
+  if (!response || response.statusCode !== 200) return null;
+  const json = await new Response(response.stream).text();
+  try { return parseSubmission(json, { server: true }); }
+  catch (error) {
+    if (error instanceof ValidationError) return null;
+    throw error;
+  }
 }
 
-async function listSubmissions() {
+function decodeCursor(cursor) {
+  if (!cursor) return null;
+  try {
+    if (typeof cursor !== "string" || cursor.length > 512) throw new Error();
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (!Number.isFinite(value.time) || typeof value.path !== "string" ||
+        !value.path.startsWith(PREFIX) || !value.path.endsWith(".json") ||
+        !isSubmissionId(value.path.slice(PREFIX.length, -5))) throw new Error();
+    return value;
+  } catch { throw new ValidationError("Invalid pagination cursor"); }
+}
+const compareBlobs = (a, b) => b.time - a.time || a.path.localeCompare(b.path);
+
+async function listSubmissions({ cursor } = {}) {
   configured();
-  const out = [];
-  let cursor;
+  const boundary = decodeCursor(cursor);
+  // List lightweight metadata to find the newest page; download only that page's bodies.
+  const blobs = [];
+  let storageCursor;
   do {
-    const page = await list({ prefix: PREFIX, limit: 1000, cursor });
-    for (const b of page.blobs) { const p = await readSubmission(b.pathname); if (p) out.push(p); }
-    cursor = page.hasMore ? page.cursor : undefined;
-  } while (cursor);
-  return out;
+    const page = await list({ prefix: PREFIX, limit: 1000, cursor: storageCursor });
+    blobs.push(...page.blobs.map(blob => ({ path: blob.pathname, time: new Date(blob.uploadedAt).getTime() })));
+    storageCursor = page.hasMore ? page.cursor : undefined;
+  } while (storageCursor);
+  const remaining = blobs.sort(compareBlobs).filter(blob => !boundary || compareBlobs(blob, boundary) > 0);
+  const page = remaining.slice(0, PAGE_SIZE);
+  const submissions = new Array(page.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, page.length) }, async () => {
+    while (next < page.length) {
+      const index = next++;
+      submissions[index] = await readSubmission(page[index].path);
+    }
+  }));
+  return {
+    submissions: submissions.filter(Boolean),
+    cursor: remaining.length > PAGE_SIZE ? Buffer.from(JSON.stringify(page[page.length - 1])).toString("base64url") : null,
+    skipped: submissions.filter(p => !p).length,
+  };
 }
 
 async function deleteSubmission(id) {
@@ -47,22 +82,22 @@ function cors(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Reviewer-Password");
+  res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") { res.status(204).end(); return true; }
   return false;
 }
 
 function reviewerOk(req) {
   const expected = process.env.REVIEWER_PASSWORD;
-  if (!expected) return false;
-  const given = req.headers["x-reviewer-password"] || "";
-  if (given.length !== expected.length) return false;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
-  return diff === 0;
+  const given = req.headers["x-reviewer-password"];
+  if (!expected || typeof given !== "string") return false;
+  const digest = text => createHash("sha256").update(text, "utf8").digest();
+  return timingSafeEqual(digest(given), digest(expected));
 }
 
-function fail(res, err) {
-  res.status(err.status || 500).json({ ok: false, error: err.message || "Server error" });
+function fail(res, error) {
+  if (!error.status || error.status >= 500) console.error("API request failed", error);
+  return res.status(error.status || 500).json({ ok: false, error: error.status ? error.message : "Server error" });
 }
 
 module.exports = { saveSubmission, listSubmissions, deleteSubmission, cors, reviewerOk, fail };
